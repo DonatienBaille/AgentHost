@@ -1,0 +1,24 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agenthost.fullname" . }}-backend
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agenthost.labels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "agenthost.labels" . | nindent 14 }}
+              app.kubernetes.io/component: frontend
+      ports:
+        - port: {{ .Values.service.backend.port }}
+  egress:
+    - {} # backend needs egress to postgres, redis, docker daemon, and agent image registries
+{{- end }}

@@ -1,0 +1,87 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agenthost-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: agenthost
+      POSTGRES_PASSWORD: agenthost_dev
+      POSTGRES_DB: agenthost
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenthost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: agenthost-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: agenthost-backend
+    ports:
+      - "5000:5000"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:5000
+      ConnectionStrings__DefaultConnection: "Host=postgres;Database=agenthost;Username=agenthost;Password=agenthost_dev"
+      Redis__Host: redis
+      Redis__Port: "6379"
+      Docker__Host: unix:///var/run/docker.sock
+      Docker__WorkspacePath: /var/agenthost/runs
+      Cors__AllowedOrigins__0: http://localhost:4200
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - ./runs:/var/agenthost/runs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: agenthost-frontend
+    ports:
+      - "4200:80"
+    environment:
+      API_URL: http://localhost:5000
+      SIGNALR_URL: http://localhost:5000
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: agenthost
+    driver: bridge

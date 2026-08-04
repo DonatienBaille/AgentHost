@@ -1,0 +1,64 @@
+replicaCount: 2
+
+image:
+  backend: agenthost/backend:latest
+  frontend: agenthost/frontend:latest
+  pullPolicy: IfNotPresent
+
+service:
+  backend:
+    port: 5000
+  frontend:
+    port: 80
+
+postgres:
+  enabled: true
+  auth:
+    username: agenthost
+    password: changeme
+    database: agenthost
+  persistence:
+    size: 10Gi
+
+redis:
+  enabled: true
+
+ingress:
+  enabled: true
+  className: nginx
+  host: agenthost.example.com
+  tls: true
+
+resources:
+  backend:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  frontend:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+autoscaling:
+  backend:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+
+podDisruptionBudget:
+  backend:
+    minAvailable: 1
+
+networkPolicy:
+  enabled: true
+
+secrets:
+  # Populate via --set or an external Secret; never commit real values.
+  connectionString: ""

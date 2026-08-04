@@ -1,0 +1,36 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "agenthost.fullname" . }}-redis
+spec:
+  serviceName: {{ include "agenthost.fullname" . }}-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "agenthost.labels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "agenthost.labels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agenthost.fullname" . }}-redis
+spec:
+  clusterIP: None
+  selector:
+    {{- include "agenthost.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  ports:
+    - port: 6379
+{{- end }}
