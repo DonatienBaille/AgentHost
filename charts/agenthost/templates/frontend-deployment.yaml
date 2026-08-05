@@ -17,18 +17,26 @@ spec:
         {{- include "agenthost.labels" . | nindent 8 }}
         app.kubernetes.io/component: frontend
     spec:
+      securityContext:
+        # The image runs nginx as the unprivileged `nginx` user (uid 101 in nginx:alpine), which is
+        # why it listens on 8080 rather than 80.
+        runAsNonRoot: true
       containers:
         - name: frontend
           image: "{{ .Values.image.frontend }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
-            - containerPort: {{ .Values.service.frontend.port }}
+            - containerPort: {{ .Values.service.frontend.containerPort }}
           resources:
             {{- toYaml .Values.resources.frontend | nindent 12 }}
           readinessProbe:
             httpGet:
               path: /
-              port: {{ .Values.service.frontend.port }}
+              port: {{ .Values.service.frontend.containerPort }}
             initialDelaySeconds: 5
             periodSeconds: 10
 ---
@@ -45,4 +53,4 @@ spec:
     app.kubernetes.io/component: frontend
   ports:
     - port: {{ .Values.service.frontend.port }}
-      targetPort: {{ .Values.service.frontend.port }}
+      targetPort: {{ .Values.service.frontend.containerPort }}

@@ -28,6 +28,56 @@ services:
       timeout: 5s
       retries: 5
 
+  # Filtering Docker API proxy. The backend used to receive /var/run/docker.sock bind-mounted
+  # read-write, which is equivalent to handing it root on the host: anyone who can reach that
+  # socket can start a privileged container that mounts /. This proxy sits in front of the socket
+  # and only forwards the endpoint groups the orchestrator actually uses (images + containers),
+  # rejecting everything else — exec, volumes, networks, swarm, plugins, the info/system APIs.
+  #
+  # This is a mitigation, not elimination: "create and start containers" is still enough to escape
+  # to the host (nothing stops a request that asks for a privileged container or a host bind
+  # mount). See the security section of README.md.
+  #
+  # The env var names below are those of tecnativa/docker-socket-proxy 0.3.x; verify them against
+  # the tag you pin if you change it. Everything not listed defaults to 0 (denied).
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: agenthost-docker-proxy
+    environment:
+      # Endpoint groups the orchestrator calls.
+      CONTAINERS: 1        # create/inspect/logs/wait/remove
+      IMAGES: 1            # pull (POST /images/create)
+      # Mutating verbs. Without POST the proxy is read-only and no agent can be launched.
+      POST: 1
+      ALLOW_START: 1
+      ALLOW_STOP: 1
+      ALLOW_RESTARTS: 0
+      # Everything else stays denied.
+      AUTH: 0
+      BUILD: 0
+      COMMIT: 0
+      CONFIGS: 0
+      DISTRIBUTION: 0
+      EXEC: 0
+      INFO: 0
+      NETWORKS: 0
+      NODES: 0
+      PLUGINS: 0
+      SECRETS: 0
+      SERVICES: 0
+      SESSION: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+      VOLUMES: 0
+    volumes:
+      # Read-only: the proxy needs to talk to the socket, not to be able to replace it.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    # Not published on the host — only reachable from the compose network.
+    expose:
+      - "2375"
+
   backend:
     build:
       context: .
@@ -41,10 +91,19 @@ services:
       ConnectionStrings__DefaultConnection: "Host=postgres;Database=agenthost;Username=agenthost;Password=agenthost_dev"
       Redis__Host: redis
       Redis__Port: "6379"
-      Docker__Host: unix:///var/run/docker.sock
+      # Through the filtering proxy, never the raw socket (see docker-socket-proxy above).
+      Docker__Host: tcp://docker-socket-proxy:2375
       Docker__WorkspacePath: /var/agenthost/runs
+      # Agents with permissions.network=allowlist need an egress proxy; unset here, so such runs
+      # get no network at all rather than unfiltered egress. Point this at your proxy to enable
+      # them, e.g. http://egress-proxy:3128.
+      # Docker__EgressProxy: http://egress-proxy:3128
       Artifacts__StoragePath: /var/agenthost/artifacts
       Cors__AllowedOrigins__0: http://localhost:4200
+      # Trust X-Forwarded-For from the frontend nginx (any address on the compose bridge network),
+      # so the API rate-limits by real client IP instead of lumping every anonymous caller into the
+      # proxy's single bucket. Only this private range is trusted — see Program.cs.
+      ForwardedHeaders__KnownNetworks__0: 172.16.0.0/12
       # Dev-only AES-256 key (32 bytes, base64) so encrypted secrets survive container
       # restarts. Generate your own for any non-throwaway environment.
       Secrets__EncryptionKey: "5ijlcr2IxwxqH7PEwsUIGQSvbZ/w6EMuOk3mXorL54c="
@@ -53,7 +112,9 @@ services:
       Jwt__Issuer: agenthost
       Jwt__Audience: agenthost
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:rw
+      # No docker.sock here any more — Docker access goes through docker-socket-proxy.
+      # NOTE: these directories must be writable by uid 64198 (the image's `agenthost` user):
+      #   mkdir -p runs artifacts && sudo chown -R 64198:64198 runs artifacts
       - ./runs:/var/agenthost/runs
       - ./artifacts:/var/agenthost/artifacts
     depends_on:
@@ -61,8 +122,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      # Liveness only: readiness (/health/ready) also checks Postgres, and compose must not keep
+      # restarting the API because the database is briefly unavailable.
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -73,14 +138,15 @@ services:
       dockerfile: Dockerfile.frontend
     container_name: agenthost-frontend
     ports:
-      - "4200:80"
+      # The image serves on 8080 because nginx runs unprivileged (see Dockerfile.frontend).
+      - "4200:8080"
     environment:
       API_URL: http://localhost:5000
       SIGNALR_URL: http://localhost:5000
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -1,0 +1,43 @@
+{{- /*
+Run workspaces and artifacts are plain files written by the orchestrator. Without these claims the
+backend writes them into the pod's ephemeral filesystem, where every artifact is lost on restart and
+invisible to any other pod. accessMode ReadWriteOnce is coherent with replicaCount 1 (see
+values.yaml); more than one backend replica would need ReadWriteMany.
+*/ -}}
+{{- if .Values.persistence.runs.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agenthost.fullname" . }}-runs
+  labels:
+    {{- include "agenthost.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  accessModes:
+    - {{ .Values.persistence.runs.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.runs.size }}
+  {{- with .Values.persistence.runs.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}
+{{- if .Values.persistence.artifacts.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agenthost.fullname" . }}-artifacts
+  labels:
+    {{- include "agenthost.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  accessModes:
+    - {{ .Values.persistence.artifacts.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.artifacts.size }}
+  {{- with .Values.persistence.artifacts.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}

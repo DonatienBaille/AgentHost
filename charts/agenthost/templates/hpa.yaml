@@ -1,3 +1,10 @@
+{{- /*
+Disabled by default (values.yaml). The backend is not horizontally scalable today: the orchestrator
+talks to the Docker daemon of its own node and run data lives on a ReadWriteOnce volume, so extra
+replicas cannot manage or observe runs started by the first one. This template is kept ready for the
+day the orchestrator moves into its own runner tier; enabling it before then adds replicas that
+silently cannot do the job.
+*/ -}}
 {{- if .Values.autoscaling.backend.enabled }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

@@ -1,3 +1,9 @@
+{{- /*
+Only meaningful with more than one replica: a PDB of minAvailable 1 over a single-replica Deployment
+makes the pod undisruptable, which blocks node drains and upgrades instead of protecting
+availability. With replicaCount 1 (the default — see values.yaml) no budget is rendered.
+*/ -}}
+{{- if gt (int .Values.replicaCount) 1 }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -8,3 +14,4 @@ spec:
     matchLabels:
       {{- include "agenthost.labels" . | nindent 6 }}
       app.kubernetes.io/component: backend
+{{- end }}

@@ -7,6 +7,11 @@ metadata:
     app.kubernetes.io/component: backend
 spec:
   replicas: {{ .Values.replicaCount }}
+  # The orchestrator is node-bound and its data lives on a ReadWriteOnce volume, so a rolling
+  # update must terminate the old pod before starting the new one — otherwise the new pod cannot
+  # attach the volume and the rollout stalls.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "agenthost.labels" . | nindent 6 }}
@@ -17,10 +22,25 @@ spec:
         {{- include "agenthost.labels" . | nindent 8 }}
         app.kubernetes.io/component: backend
     spec:
+      securityContext:
+        # Matches the uid/gid baked into Dockerfile.backend.
+        runAsNonRoot: true
+        runAsUser: 64198
+        runAsGroup: 64198
+        fsGroup: 64198
+        {{- if and .Values.docker.mountSocket (gt (int .Values.docker.socketGroupId) 0) }}
+        # Lets the non-root user reach the node's Docker socket without running as root.
+        supplementalGroups:
+          - {{ .Values.docker.socketGroupId }}
+        {{- end }}
       containers:
         - name: backend
           image: "{{ .Values.image.backend }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: {{ .Values.service.backend.port }}
           env:
@@ -41,17 +61,97 @@ spec:
                 secretKeyRef:
                   name: {{ include "agenthost.fullname" . }}-secrets
                   key: jwtSecret
+            {{- if .Values.redis.enabled }}
+            # Also switches on the SignalR Redis backplane (Program.cs enables it whenever Redis is
+            # reachable), without which hub events never reach clients on another replica.
+            - name: Redis__Host
+              value: {{ include "agenthost.fullname" . }}-redis
+            - name: Redis__Port
+              value: "6379"
+            {{- end }}
+            - name: Docker__Host
+              value: {{ .Values.docker.host | default (printf "unix://%s" .Values.docker.socketPath) | quote }}
+            - name: Docker__WorkspacePath
+              value: /var/agenthost/runs
+            {{- with .Values.docker.egressProxy }}
+            - name: Docker__EgressProxy
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.docker.allowlistNetwork }}
+            - name: Docker__AllowlistNetwork
+              value: {{ . | quote }}
+            {{- end }}
+            - name: Artifacts__StoragePath
+              value: /var/agenthost/artifacts
+            - name: Retention__WorkspaceHours
+              value: {{ .Values.retention.workspaceHours | quote }}
+            - name: Retention__SecretsGraceMinutes
+              value: {{ .Values.retention.secretsGraceMinutes | quote }}
+            - name: Retention__ArtifactDays
+              value: {{ .Values.retention.artifactDays | quote }}
+            {{- range $i, $network := .Values.forwardedHeaders.knownNetworks }}
+            - name: ForwardedHeaders__KnownNetworks__{{ $i }}
+              value: {{ $network | quote }}
+            {{- end }}
+            {{- range $i, $proxy := .Values.forwardedHeaders.knownProxies }}
+            - name: ForwardedHeaders__KnownProxies__{{ $i }}
+              value: {{ $proxy | quote }}
+            {{- end }}
+            {{- with .Values.otlpEndpoint }}
+            - name: OpenTelemetry__OtlpEndpoint
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.ingress.enabled }}
+            - name: Cors__AllowedOrigins__0
+              value: "http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}"
+            {{- end }}
+          volumeMounts:
+            - name: runs
+              mountPath: /var/agenthost/runs
+            - name: artifacts
+              mountPath: /var/agenthost/artifacts
+            {{- if .Values.docker.mountSocket }}
+            - name: docker-socket
+              mountPath: {{ .Values.docker.socketPath }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources.backend | nindent 12 }}
+          # Readiness gates traffic on Postgres being reachable; liveness deliberately does not, so
+          # a database blip cannot make the kubelet restart every otherwise-healthy pod.
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
               port: {{ .Values.service.backend.port }}
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: {{ .Values.service.backend.port }}
             initialDelaySeconds: 15
             periodSeconds: 20
+      volumes:
+        # Run workspaces and artifacts must outlive the pod: artifacts are served back to users long
+        # after the run that produced them has exited.
+        - name: runs
+          {{- if .Values.persistence.runs.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "agenthost.fullname" . }}-runs
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: artifacts
+          {{- if .Values.persistence.artifacts.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "agenthost.fullname" . }}-artifacts
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.docker.mountSocket }}
+        # The orchestrator launches agents on the node's Docker daemon; with no socket here and no
+        # proxy in docker.host, the backend cannot start a single run.
+        - name: docker-socket
+          hostPath:
+            path: {{ .Values.docker.socketPath }}
+            type: Socket
+        {{- end }}

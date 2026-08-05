@@ -16,7 +16,22 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/publish .
+# Run as a dedicated unprivileged account. This image talks to a Docker daemon, so an RCE in the
+# API used to mean root on the host (root in the container + a read-write docker.sock bind). The
+# non-root user is one half of that fix; routing Docker access through a filtering socket proxy
+# instead of a raw socket bind (see docker-compose.yml) is the other.
+RUN groupadd --system --gid 64198 agenthost \
+    && useradd --system --uid 64198 --gid agenthost --home-dir /app --shell /usr/sbin/nologin agenthost
+
+COPY --from=builder --chown=agenthost:agenthost /app/publish .
+
+# Serilog's file sink writes under the content root; runs and artifacts live under /var/agenthost.
+# NOTE: when those paths are bind-mounted from the host, the host directories must be writable by
+# uid 64198 — a root-owned bind mount will make the container fail to write there.
+RUN mkdir -p /app/logs /var/agenthost/runs /var/agenthost/artifacts \
+    && chown -R agenthost:agenthost /app/logs /var/agenthost
+
+USER agenthost
 
 EXPOSE 5000
 ENTRYPOINT ["dotnet", "AgentHost.Api.dll"]
