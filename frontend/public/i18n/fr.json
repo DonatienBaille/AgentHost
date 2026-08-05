@@ -57,7 +57,21 @@
     "created": "Créé le",
     "artifacts": "Artefacts",
     "download": "Télécharger",
-    "noArtifacts": "Aucun artefact pour le moment."
+    "noArtifacts": "Aucun artefact pour le moment.",
+    "approvalRequired": "Validation requise",
+    "questionAsked": "Question de l'agent",
+    "approvalLoading": "Chargement de la demande…",
+    "requiredRole": "Rôle requis",
+    "expiresAt": "Expire le",
+    "approvalsCollected": "Validations",
+    "insufficientRole": "Seul un utilisateur avec le rôle {{role}} (ou supérieur) peut répondre à cette demande.",
+    "reject": "Rejeter",
+    "deciding": "Envoi…",
+    "submitAnswer": "Envoyer la réponse",
+    "answerPlaceholder": "Votre réponse",
+    "decisionFailed": "La décision n'a pas pu être enregistrée.",
+    "answerFailed": "La réponse n'a pas pu être enregistrée.",
+    "approvalHistory": "Historique des validations"
   },
   "newRun": {
     "title": "Nouveau run",
@@ -224,5 +238,16 @@
     "requestFailed": "Échec de la requête",
     "forbidden": "Permissions insuffisantes : votre rôle ne permet pas cette action.",
     "sessionExpired": "Votre session a expiré. Veuillez vous reconnecter."
+  },
+  "approvalType": {
+    "gate": "Validation",
+    "question": "Question",
+    "budget_increase": "Augmentation de budget"
+  },
+  "approvalStatus": {
+    "pending": "En attente",
+    "approved": "Validée",
+    "rejected": "Rejetée",
+    "expired": "Expirée"
   }
 }

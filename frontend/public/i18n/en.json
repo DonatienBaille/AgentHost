@@ -57,7 +57,21 @@
     "created": "Created",
     "artifacts": "Artifacts",
     "download": "Download",
-    "noArtifacts": "No artifacts yet."
+    "noArtifacts": "No artifacts yet.",
+    "approvalRequired": "Approval required",
+    "questionAsked": "Question from the agent",
+    "approvalLoading": "Loading the request…",
+    "requiredRole": "Required role",
+    "expiresAt": "Expires",
+    "approvalsCollected": "Approvals",
+    "insufficientRole": "Only a user with the {{role}} role (or above) can respond to this request.",
+    "reject": "Reject",
+    "deciding": "Submitting…",
+    "submitAnswer": "Send answer",
+    "answerPlaceholder": "Your answer",
+    "decisionFailed": "The decision could not be recorded.",
+    "answerFailed": "The answer could not be recorded.",
+    "approvalHistory": "Approval history"
   },
   "newRun": {
     "title": "New run",
@@ -224,5 +238,16 @@
     "requestFailed": "Request failed",
     "forbidden": "Insufficient permissions: your role does not allow this action.",
     "sessionExpired": "Your session has expired. Please sign in again."
+  },
+  "approvalType": {
+    "gate": "Gate",
+    "question": "Question",
+    "budget_increase": "Budget increase"
+  },
+  "approvalStatus": {
+    "pending": "Pending",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "expired": "Expired"
   }
 }

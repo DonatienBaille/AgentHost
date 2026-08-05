@@ -2,7 +2,14 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
-import { ApprovalRequest, CreateRunRequest, Run, RunEvent } from '../core/models';
+import {
+  AnswerQuestionRequest,
+  Approval,
+  ApprovalRequest,
+  CreateRunRequest,
+  Run,
+  RunEvent,
+} from '../core/models';
 
 const BASE_URL = `${environment.apiUrl}/api/runs`;
 
@@ -116,6 +123,7 @@ export class RunService {
     }
   }
 
+  /** Approves or rejects the run's pending gate (POST /api/runs/{id}/approve). */
   async approveRun(id: string, req: ApprovalRequest): Promise<void> {
     try {
       await firstValueFrom(this.http.post<void>(`${BASE_URL}/${id}/approve`, req));
@@ -124,6 +132,23 @@ export class RunService {
       this.error.set(`Failed to approve run ${id}`);
       throw err;
     }
+  }
+
+  /** Answers the run's pending question (POST /api/runs/{id}/answer). */
+  async answerQuestion(id: string, questionId: string, answer: string): Promise<void> {
+    const body: AnswerQuestionRequest = { questionId, answer };
+    try {
+      await firstValueFrom(this.http.post<void>(`${BASE_URL}/${id}/answer`, body));
+      await this.fetchRun(id);
+    } catch (err) {
+      this.error.set(`Failed to answer question for run ${id}`);
+      throw err;
+    }
+  }
+
+  /** Every approval ever raised on a run (GET /api/runs/{runId}/approvals). */
+  async fetchApprovals(id: string): Promise<Approval[]> {
+    return await firstValueFrom(this.http.get<Approval[]>(`${BASE_URL}/${id}/approvals`));
   }
 
   async fetchEvents(id: string, fromSeq = 0): Promise<RunEvent[]> {

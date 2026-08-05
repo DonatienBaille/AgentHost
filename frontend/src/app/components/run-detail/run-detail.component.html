@@ -15,20 +15,6 @@
         }
       </div>
       <div class="flex gap-2 items-center">
-        @if (current_run?.status === 'awaiting_approval') {
-          <input
-            type="text"
-            class="px-2 py-2 bg-gray-900 border border-gray-700 rounded text-sm w-48"
-            [placeholder]="'runDetail.approveNotePlaceholder' | translate"
-            [(ngModel)]="approveNote"
-          />
-          <button
-            class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded font-medium transition"
-            (click)="approveStep(pendingStepId())"
-          >
-            {{ 'runDetail.approve' | translate }}
-          </button>
-        }
         @if (current_run && ['succeeded','failed','cancelled','timed_out','budget_exceeded','rejected','infra_error'].indexOf(current_run.status) === -1) {
           <button
             class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded transition"
@@ -44,7 +30,149 @@
   <!-- Main content -->
   <div class="max-w-7xl mx-auto px-6 py-8 grid gap-8 lg:grid-cols-3">
     <!-- Events (left) -->
-    <div class="lg:col-span-2">
+    <div class="lg:col-span-2 space-y-6">
+      <!-- Human-in-the-loop: the run is blocked on a gate or a question -->
+      @if (isBlocked()) {
+        @let approval = pendingApproval();
+        <div class="bg-amber-950/40 border border-amber-700 rounded-lg p-4">
+          <h2 class="text-lg font-semibold text-amber-200 mb-1">
+            {{ (isAwaitingInput() ? 'runDetail.questionAsked' : 'runDetail.approvalRequired') | translate }}
+          </h2>
+
+          @if (approval) {
+            <p class="text-gray-100 whitespace-pre-line mb-3">{{ approval.prompt }}</p>
+
+            <div class="text-xs text-gray-400 mb-4 space-x-3">
+              @if (approval.stepId) {
+                <span class="font-mono">{{ approval.stepId }}</span>
+              }
+              <span>
+                {{ 'runDetail.requiredRole' | translate }}:
+                {{ 'roles.' + requiredRole() | translate }}
+              </span>
+              <span>{{ 'runDetail.expiresAt' | translate }}: {{ approval.expiresAt | date: 'short' }}</span>
+              @if (approval.requiredCount > 1) {
+                <span>
+                  {{ 'runDetail.approvalsCollected' | translate }}:
+                  {{ approval.responses.length }} / {{ approval.requiredCount }}
+                </span>
+              }
+            </div>
+          } @else {
+            <!-- The run says it is blocked but the approval hasn't landed/loaded yet. -->
+            <p class="text-gray-300 mb-3">{{ 'runDetail.approvalLoading' | translate }}</p>
+          }
+
+          @if (!canDecide()) {
+            <!-- The server rejects under-privileged deciders, so don't offer a doomed action. -->
+            <p class="text-amber-300 text-sm">
+              {{ 'runDetail.insufficientRole' | translate: { role: 'roles.' + requiredRole() | translate } }}
+            </p>
+          } @else if (isAwaitingInput()) {
+            @if (approvalOptions().length > 0) {
+              <div class="flex flex-wrap gap-2 mb-3">
+                @for (option of approvalOptions(); track option) {
+                  <button
+                    type="button"
+                    class="px-3 py-1.5 rounded text-sm border transition"
+                    [class]="answerText() === option
+                      ? 'bg-blue-600 border-blue-500'
+                      : 'bg-gray-800 border-gray-600 hover:bg-gray-700'"
+                    (click)="selectOption(option)"
+                  >
+                    {{ option }}
+                  </button>
+                }
+              </div>
+            }
+            <div class="flex flex-wrap gap-2 items-center">
+              <input
+                type="text"
+                class="flex-1 min-w-[14rem] px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                [placeholder]="'runDetail.answerPlaceholder' | translate"
+                [value]="answerText()"
+                (input)="onAnswerInput($any($event.target).value)"
+              />
+              <button
+                type="button"
+                [disabled]="isDeciding() || !answerText().trim()"
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded font-medium transition"
+                (click)="submitAnswer()"
+              >
+                {{ (isDeciding() ? 'runDetail.deciding' : 'runDetail.submitAnswer') | translate }}
+              </button>
+            </div>
+          } @else {
+            <div class="flex flex-wrap gap-2 items-center">
+              <input
+                type="text"
+                class="flex-1 min-w-[14rem] px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                [placeholder]="'runDetail.approveNotePlaceholder' | translate"
+                [(ngModel)]="approveNote"
+              />
+              <button
+                type="button"
+                [disabled]="isDeciding()"
+                class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded font-medium transition"
+                (click)="decide('approve')"
+              >
+                {{ (isDeciding() ? 'runDetail.deciding' : 'runDetail.approve') | translate }}
+              </button>
+              <button
+                type="button"
+                [disabled]="isDeciding()"
+                class="px-4 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 rounded font-medium transition"
+                (click)="decide('reject')"
+              >
+                {{ 'runDetail.reject' | translate }}
+              </button>
+            </div>
+          }
+
+          @if (decisionError()) {
+            <p class="text-red-300 text-sm mt-3">{{ decisionError()! | translate }}</p>
+          }
+        </div>
+      }
+
+      <!-- Past decisions on this run -->
+      @if (approvals().length > 0) {
+        <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+          <h2 class="text-lg font-semibold mb-3">{{ 'runDetail.approvalHistory' | translate }}</h2>
+          <div class="space-y-2">
+            @for (approval of approvals(); track approval.id) {
+              <div class="bg-gray-900 border border-gray-700 rounded p-3">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="text-sm">{{ approval.prompt }}</div>
+                    <div class="text-xs text-gray-500 mt-1">
+                      {{ 'approvalType.' + approval.approvalType | translate }} ·
+                      {{ approval.createdAt | date: 'short' }}
+                    </div>
+                  </div>
+                  <span class="text-xs px-2 py-1 rounded shrink-0" [class]="approvalBadgeClass(approval.status)">
+                    {{ 'approvalStatus.' + approval.status | translate }}
+                  </span>
+                </div>
+                @for (response of approval.responses; track $index) {
+                  <div class="text-xs text-gray-400 mt-2 border-t border-gray-800 pt-2">
+                    <span class="font-mono">{{ response.by }}</span>
+                    · {{ response.decision }}
+                    · {{ response.at | date: 'short' }}
+                    @if (response.answer) {
+                      · {{ response.answer }}
+                    }
+                    @if (response.note) {
+                      · {{ response.note }}
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        </div>
+      }
+
       <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
         <h2 class="text-lg font-semibold mb-4">{{ 'runDetail.events' | translate }}</h2>
 

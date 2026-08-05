@@ -50,3 +50,21 @@ export function statusTextClass(status: RunStatus | string | null | undefined): 
 export function statusBadgeClass(status: RunStatus | string | null | undefined): string {
   return BADGE_CLASS[statusColor(status)];
 }
+
+/**
+ * Approval statuses use their own vocabulary (pending/approved/rejected/expired) and would
+ * otherwise fall through to gray in statusColor().
+ */
+export function approvalBadgeClass(status: string | null | undefined): string {
+  switch (status) {
+    case 'approved':
+      return BADGE_CLASS.green;
+    case 'rejected':
+    case 'expired':
+      return BADGE_CLASS.red;
+    case 'pending':
+      return BADGE_CLASS.yellow;
+    default:
+      return BADGE_CLASS.gray;
+  }
+}

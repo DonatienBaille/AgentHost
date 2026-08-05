@@ -44,16 +44,28 @@ export interface Run {
   updatedAt: string;
 }
 
+/**
+ * No triggeredByUserId: the actor is taken from the caller's JWT
+ * (backend Contracts/RunContracts.cs).
+ */
 export interface CreateRunRequest {
   agentId: string;
   inputs: Record<string, unknown>;
   context?: Record<string, unknown>;
+  budgetMaxUsd?: number;
 }
 
 export type ApprovalDecision = 'approve' | 'reject';
 
+/** POST /api/runs/{id}/approve. No decidedByUserId — the server reads the decider from the JWT. */
 export interface ApprovalRequest {
-  stepId: string;
+  stepId?: string;
   decision: ApprovalDecision;
   note?: string;
+}
+
+/** POST /api/runs/{id}/answer. No answeredByUserId — same reason as ApprovalRequest. */
+export interface AnswerQuestionRequest {
+  questionId: string;
+  answer: string;
 }
