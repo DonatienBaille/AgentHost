@@ -14,6 +14,26 @@ public interface IRunRepository
     Task InsertAsync(Run run, CancellationToken ct = default);
     Task UpdateAsync(Run run, CancellationToken ct = default);
     Task<long> GetNextRunNumberAsync(string projectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically adds <paramref name="deltaUsd"/> to the run's <c>budget_used_usd</c> and returns
+    /// the new total. Done as a single UPDATE ... RETURNING so concurrent usage reports from the
+    /// same agent can never lose an increment the way read-modify-write would.
+    /// </summary>
+    Task<decimal?> AddBudgetUsageAsync(string runId, decimal deltaUsd, CancellationToken ct = default);
+
+    /// <summary>Total budget consumed by a project's runs created at/after <paramref name="sinceUtc"/> (project monthly budget enforcement).</summary>
+    Task<decimal> SumBudgetUsedForProjectSinceAsync(string projectId, DateTime sinceUtc, CancellationToken ct = default);
+
+    /// <summary>Non-terminal runs that have actually started — the watchdog's timeout candidates.</summary>
+    Task<List<Run>> ListActiveStartedAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Writes only <c>runs.outputs</c>. Targeted rather than a full row update so an agent
+    /// publishing its results cannot clobber a <c>budget_used_usd</c> increment written concurrently
+    /// by its own usage reports.
+    /// </summary>
+    Task<bool> SetOutputsAsync(string runId, System.Text.Json.Nodes.JsonNode? outputs, CancellationToken ct = default);
 }
 
 public class RunRepository : IRunRepository
@@ -174,5 +194,74 @@ public class RunRepository : IRunRepository
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, run, cancellationToken: ct));
         _logger.Information("Updated run {RunId} status to {Status}", run.Id, run.Status);
+    }
+
+    public async Task<decimal?> AddBudgetUsageAsync(string runId, decimal deltaUsd, CancellationToken ct = default)
+    {
+        const string sql = """
+            UPDATE runs
+            SET budget_used_usd = COALESCE(budget_used_usd, 0) + @Delta,
+                updated_at = NOW()
+            WHERE id = @Id AND deleted_at IS NULL
+            RETURNING budget_used_usd
+            """;
+
+        using var db = _connectionFactory.CreateConnection();
+        var command = new CommandDefinition(sql, new { Id = runId, Delta = deltaUsd }, cancellationToken: ct);
+        return await db.ExecuteScalarAsync<decimal?>(command);
+    }
+
+    public async Task<decimal> SumBudgetUsedForProjectSinceAsync(string projectId, DateTime sinceUtc, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT COALESCE(SUM(COALESCE(budget_used_usd, 0)), 0)
+            FROM runs
+            WHERE project_id = @ProjectId AND created_at >= @Since AND deleted_at IS NULL
+            """;
+
+        using var db = _connectionFactory.CreateConnection();
+        var command = new CommandDefinition(sql, new { ProjectId = projectId, Since = sinceUtc }, cancellationToken: ct);
+        return await db.ExecuteScalarAsync<decimal>(command);
+    }
+
+    public async Task<bool> SetOutputsAsync(string runId, System.Text.Json.Nodes.JsonNode? outputs, CancellationToken ct = default)
+    {
+        const string sql = """
+            UPDATE runs
+            SET outputs = @Outputs::jsonb,
+                updated_at = NOW()
+            WHERE id = @Id AND deleted_at IS NULL
+            """;
+
+        using var db = _connectionFactory.CreateConnection();
+        var command = new CommandDefinition(
+            sql, new { Id = runId, Outputs = outputs?.ToJsonString() }, cancellationToken: ct);
+        var rows = await db.ExecuteAsync(command);
+        return rows > 0;
+    }
+
+    /// <summary>
+    /// Candidate runs for the watchdog's timeout sweep.
+    ///
+    /// SQL narrows on the columns that are reliable (started, not deleted, started recently); the
+    /// terminal-status filter is applied in C# because Dapper writes enum parameters as their
+    /// underlying ordinal rather than through the registered TypeHandler, so `runs.status` does not
+    /// hold the 'succeeded'/'failed'/... text a SQL predicate would need. The lookback keeps the
+    /// candidate set bounded: no manifest maxDuration comes close to a week.
+    /// </summary>
+    public async Task<List<Run>> ListActiveStartedAsync(CancellationToken ct = default)
+    {
+        var sql = $"""
+            SELECT {SelectColumns} FROM runs
+            WHERE deleted_at IS NULL
+              AND started_at IS NOT NULL
+              AND started_at > NOW() - INTERVAL '7 days'
+            ORDER BY started_at ASC
+            LIMIT 1000
+            """;
+
+        using var db = _connectionFactory.CreateConnection();
+        var runs = await db.QueryAsync<Run>(new CommandDefinition(sql, cancellationToken: ct));
+        return runs.Where(r => !r.Status.IsTerminal()).ToList();
     }
 }
