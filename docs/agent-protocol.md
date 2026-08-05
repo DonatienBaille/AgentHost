@@ -26,9 +26,9 @@ that one run.
 ### Secrets are files, not environment variables
 
 **Secrets are never exported as `SECRET_<NAME>` environment variables** (they were in earlier
-builds; that is gone). Environment variables are readable by anyone who can run `docker inspect`
-on the container and by every process inside it via `/proc/1/environ`, so shipping secrets that way
-defeated the read-only secrets mount.
+builds; that is gone). Environment variables are readable by anyone who can run `docker inspect` /
+`podman inspect` on the container and by every process inside it via `/proc/1/environ`, so shipping
+secrets that way defeated the read-only secrets mount.
 
 Read each secret from a file instead:
 
@@ -49,8 +49,15 @@ secret is only readable for the lifetime of the run.
 
 ### Filesystem
 
-The workspace is bind-mounted read-write at `/workspace`; its host path is recorded in
+The workspace is bind-mounted read-write at `/workspace`; the host's path for it is recorded in
 `runs.workspace_path`. It is the only durable place an agent may write.
+
+> Two paths are involved on the host side and they need not be the same string: the one the backend
+> writes through (`Docker:WorkspacePath`, which is what `runs.workspace_path` records) and the one
+> the container daemon mounts (`Docker:HostWorkspacePath`). Nothing about this is visible inside the
+> container — `/workspace` and `/run/secrets` are where this document says they are — but an operator
+> reading `runs.workspace_path` on a daemon host should know it may be the backend's path, not
+> theirs. See "Chemins de bind mount" in README.md.
 
 The container root filesystem is **read-only** by default, with a small `tmpfs` mounted at `/tmp`.
 An agent that genuinely cannot work under a read-only rootfs must opt in explicitly in its
@@ -252,6 +259,11 @@ On every terminal transition the run is appended to the project's memory (`run_h
 feeds pattern detection.
 
 ## 5. Minimal agent example
+
+`host.docker.internal` below is a Docker Desktop convenience name. Podman provides
+`host.containers.internal` (and, for compatibility, `host.docker.internal` in recent versions);
+plain Linux Docker provides neither. Set `AGENTHOST_API_URL` explicitly for anything beyond a
+laptop — an agent should not have to guess how to reach the API.
 
 ```bash
 #!/usr/bin/env bash
