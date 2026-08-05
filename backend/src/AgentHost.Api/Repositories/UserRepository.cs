@@ -40,29 +40,32 @@ public class UserRepository : IUserRepository
     {
         var sql = $"SELECT {SelectColumns} FROM users WHERE id = @Id AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<User>(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        var row = await db.QueryFirstOrDefaultAsync<UserRow>(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     public async Task<User?> GetAsync(string id, string orgId, CancellationToken ct = default)
     {
         var sql = $"SELECT {SelectColumns} FROM users WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<User>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+        var row = await db.QueryFirstOrDefaultAsync<UserRow>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     public async Task<User?> GetByEmailAsync(string email, CancellationToken ct = default)
     {
         var sql = $"SELECT {SelectColumns} FROM users WHERE email = @Email AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<User>(new CommandDefinition(sql, new { Email = email }, cancellationToken: ct));
+        var row = await db.QueryFirstOrDefaultAsync<UserRow>(new CommandDefinition(sql, new { Email = email }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     public async Task<List<User>> ListByOrgAsync(string orgId, CancellationToken ct = default)
     {
         var sql = $"SELECT {SelectColumns} FROM users WHERE org_id = @OrgId AND deleted_at IS NULL ORDER BY created_at DESC";
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<User>(new CommandDefinition(sql, new { OrgId = orgId }, cancellationToken: ct));
-        return rows.ToList();
+        var rows = await db.QueryAsync<UserRow>(new CommandDefinition(sql, new { OrgId = orgId }, cancellationToken: ct));
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 
     public async Task InsertAsync(User user, CancellationToken ct = default)
@@ -72,7 +75,7 @@ public class UserRepository : IUserRepository
             VALUES (@Id, @OrgId, @Email, @DisplayName, @AvatarUrl, @Role, @PasswordHash, @CreatedAt, @UpdatedAt)
             """;
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, user, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, UserRow.FromDomain(user), cancellationToken: ct));
         _logger.Information("Inserted user {UserId} ({Email})", user.Id, user.Email);
     }
 
@@ -85,7 +88,7 @@ public class UserRepository : IUserRepository
             WHERE id = @Id
             """;
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, user, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, UserRow.FromDomain(user), cancellationToken: ct));
         _logger.Information("Updated user {UserId}", user.Id);
     }
 

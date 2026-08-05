@@ -41,7 +41,8 @@ public class SecretRepository : ISecretRepository
     {
         var sql = $"SELECT {SelectColumns} FROM secrets WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<Secret>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+        var row = await db.QueryFirstOrDefaultAsync<SecretRow>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     public async Task<List<Secret>> ListByOrgAsync(string orgId, int skip = 0, int take = 200, CancellationToken ct = default)
@@ -53,18 +54,19 @@ public class SecretRepository : ISecretRepository
             LIMIT @Take OFFSET @Skip
             """;
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<Secret>(new CommandDefinition(
+        var rows = await db.QueryAsync<SecretRow>(new CommandDefinition(
             sql,
             new { OrgId = orgId, Skip = Paging.ClampSkip(skip), Take = Paging.ClampTake(take) },
             cancellationToken: ct));
-        return rows.ToList();
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 
     public async Task<Secret?> GetByNameAsync(string orgId, string name, CancellationToken ct = default)
     {
         var sql = $"SELECT {SelectColumns} FROM secrets WHERE org_id = @OrgId AND name = @Name AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<Secret>(new CommandDefinition(sql, new { OrgId = orgId, Name = name }, cancellationToken: ct));
+        var row = await db.QueryFirstOrDefaultAsync<SecretRow>(new CommandDefinition(sql, new { OrgId = orgId, Name = name }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     /// <summary>
@@ -84,8 +86,8 @@ public class SecretRepository : ISecretRepository
               AND (scope = 'org' OR (scope = 'project' AND project_id = @ProjectId))
             """;
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<Secret>(new CommandDefinition(sql, new { OrgId = orgId, ProjectId = projectId, Names = nameList.ToArray() }, cancellationToken: ct));
-        return rows.ToList();
+        var rows = await db.QueryAsync<SecretRow>(new CommandDefinition(sql, new { OrgId = orgId, ProjectId = projectId, Names = nameList.ToArray() }, cancellationToken: ct));
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 
     public async Task InsertAsync(Secret secret, CancellationToken ct = default)
@@ -100,7 +102,7 @@ public class SecretRepository : ISecretRepository
             )
             """;
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, secret, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, SecretRow.FromDomain(secret), cancellationToken: ct));
         _logger.Information("Inserted secret {SecretId} ({Name})", secret.Id, secret.Name);
     }
 
@@ -115,7 +117,7 @@ public class SecretRepository : ISecretRepository
             WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL
             """;
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, secret, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, SecretRow.FromDomain(secret), cancellationToken: ct));
         _logger.Information("Updated secret {SecretId}", secret.Id);
     }
 

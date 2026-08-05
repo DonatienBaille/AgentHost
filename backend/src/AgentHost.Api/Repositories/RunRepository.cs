@@ -70,7 +70,8 @@ public class RunRepository : IRunRepository
         var sql = $"SELECT {SelectColumns} FROM runs WHERE id = @Id AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
         var command = new CommandDefinition(sql, new { Id = id }, cancellationToken: ct);
-        return await db.QueryFirstOrDefaultAsync<Run>(command);
+        var row = await db.QueryFirstOrDefaultAsync<RunRow>(command);
+        return row?.ToDomain();
     }
 
     public async Task<Run?> GetAsync(string id, string orgId, CancellationToken ct = default)
@@ -78,7 +79,8 @@ public class RunRepository : IRunRepository
         var sql = $"SELECT {SelectColumns} FROM runs WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
         var command = new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct);
-        return await db.QueryFirstOrDefaultAsync<Run>(command);
+        var row = await db.QueryFirstOrDefaultAsync<RunRow>(command);
+        return row?.ToDomain();
     }
 
     public async Task<List<Run>> ListByProjectAsync(string projectId, string orgId, int skip = 0, int take = 50, CancellationToken ct = default)
@@ -94,8 +96,8 @@ public class RunRepository : IRunRepository
             sql,
             new { ProjectId = projectId, OrgId = orgId, Skip = Paging.ClampSkip(skip), Take = Paging.ClampTake(take) },
             cancellationToken: ct);
-        var runs = await db.QueryAsync<Run>(command);
-        return runs.ToList();
+        var rows = await db.QueryAsync<RunRow>(command);
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 
     public async Task<List<Run>> ListByOrgAsync(string orgId, int skip = 0, int take = 50, CancellationToken ct = default)
@@ -111,8 +113,8 @@ public class RunRepository : IRunRepository
             sql,
             new { OrgId = orgId, Skip = Paging.ClampSkip(skip), Take = Paging.ClampTake(take) },
             cancellationToken: ct);
-        var runs = await db.QueryAsync<Run>(command);
-        return runs.ToList();
+        var rows = await db.QueryAsync<RunRow>(command);
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 
     /// <summary>
@@ -175,7 +177,7 @@ public class RunRepository : IRunRepository
             """;
 
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, run, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, RunRow.FromDomain(run), cancellationToken: ct));
         _logger.Information("Inserted run {RunId}", run.Id);
     }
 
@@ -201,7 +203,7 @@ public class RunRepository : IRunRepository
             """;
 
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, run, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, RunRow.FromDomain(run), cancellationToken: ct));
         _logger.Information("Updated run {RunId} status to {Status}", run.Id, run.Status);
     }
 
@@ -250,13 +252,11 @@ public class RunRepository : IRunRepository
     }
 
     /// <summary>
-    /// Candidate runs for the watchdog's timeout sweep.
-    ///
-    /// SQL narrows on the columns that are reliable (started, not deleted, started recently); the
-    /// terminal-status filter is applied in C# because Dapper writes enum parameters as their
-    /// underlying ordinal rather than through the registered TypeHandler, so `runs.status` does not
-    /// hold the 'succeeded'/'failed'/... text a SQL predicate would need. The lookback keeps the
-    /// candidate set bounded: no manifest maxDuration comes close to a week.
+    /// Candidate runs for the watchdog's timeout sweep. The terminal-status filter runs in SQL:
+    /// `runs.status` holds the documented snake_case text (see RunStatusExtensions.ToDbString and
+    /// migrations/0004_enum_string_encoding.sql), so the predicate matches the same set
+    /// <see cref="RunStatusExtensions.IsTerminal"/> would. The 7-day lookback keeps the candidate
+    /// set bounded: no manifest maxDuration comes close to a week.
     /// </summary>
     public async Task<List<Run>> ListActiveStartedAsync(CancellationToken ct = default)
     {
@@ -265,12 +265,20 @@ public class RunRepository : IRunRepository
             WHERE deleted_at IS NULL
               AND started_at IS NOT NULL
               AND started_at > NOW() - INTERVAL '7 days'
+              AND status <> ALL(@TerminalStatuses)
             ORDER BY started_at ASC
             LIMIT 1000
             """;
 
         using var db = _connectionFactory.CreateConnection();
-        var runs = await db.QueryAsync<Run>(new CommandDefinition(sql, cancellationToken: ct));
-        return runs.Where(r => !r.Status.IsTerminal()).ToList();
+        var rows = await db.QueryAsync<RunRow>(new CommandDefinition(
+            sql, new { TerminalStatuses = TerminalStatuses }, cancellationToken: ct));
+        return rows.Select(r => r.ToDomain()).ToList();
     }
+
+    /// <summary>The DB encoding of every terminal <see cref="RunStatus"/>, derived from the enum itself.</summary>
+    private static readonly string[] TerminalStatuses = Enum.GetValues<RunStatus>()
+        .Where(s => s.IsTerminal())
+        .Select(s => s.ToDbString())
+        .ToArray();
 }

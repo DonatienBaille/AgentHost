@@ -45,29 +45,32 @@ public class AgentRepository : IAgentRepository
     {
         var sql = $"SELECT {SelectColumns} FROM agents WHERE id = @Id AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<Agent>(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        var row = await db.QueryFirstOrDefaultAsync<AgentRow>(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     public async Task<Agent?> GetBySlugAsync(string orgId, string slug, CancellationToken ct = default)
     {
         var sql = $"SELECT {SelectColumns} FROM agents WHERE org_id = @OrgId AND slug = @Slug AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<Agent>(new CommandDefinition(sql, new { OrgId = orgId, Slug = slug }, cancellationToken: ct));
+        var row = await db.QueryFirstOrDefaultAsync<AgentRow>(new CommandDefinition(sql, new { OrgId = orgId, Slug = slug }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     public async Task<Agent?> GetAsync(string id, string orgId, CancellationToken ct = default)
     {
         var sql = $"SELECT {SelectColumns} FROM agents WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<Agent>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+        var row = await db.QueryFirstOrDefaultAsync<AgentRow>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     public async Task<List<Agent>> ListByOrgAsync(string orgId, CancellationToken ct = default)
     {
         var sql = $"SELECT {SelectColumns} FROM agents WHERE org_id = @OrgId AND deleted_at IS NULL ORDER BY created_at DESC";
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<Agent>(new CommandDefinition(sql, new { OrgId = orgId }, cancellationToken: ct));
-        return rows.ToList();
+        var rows = await db.QueryAsync<AgentRow>(new CommandDefinition(sql, new { OrgId = orgId }, cancellationToken: ct));
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 
     public async Task<List<Agent>> ListByProjectAsync(string projectId, string orgId, CancellationToken ct = default)
@@ -78,8 +81,8 @@ public class AgentRepository : IAgentRepository
             ORDER BY created_at DESC
             """;
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<Agent>(new CommandDefinition(sql, new { ProjectId = projectId, OrgId = orgId }, cancellationToken: ct));
-        return rows.ToList();
+        var rows = await db.QueryAsync<AgentRow>(new CommandDefinition(sql, new { ProjectId = projectId, OrgId = orgId }, cancellationToken: ct));
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 
     public async Task InsertAsync(Agent agent, CancellationToken ct = default)
@@ -97,7 +100,7 @@ public class AgentRepository : IAgentRepository
             """;
 
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, agent, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, AgentRow.FromDomain(agent), cancellationToken: ct));
         _logger.Information("Inserted agent {AgentId} ({Slug})", agent.Id, agent.Slug);
     }
 
@@ -117,7 +120,7 @@ public class AgentRepository : IAgentRepository
             """;
 
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, agent, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, AgentRow.FromDomain(agent), cancellationToken: ct));
         _logger.Information("Updated agent {AgentId}", agent.Id);
     }
 

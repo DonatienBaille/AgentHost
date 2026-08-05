@@ -57,7 +57,8 @@ public class ApprovalRepository : IApprovalRepository
             WHERE ap.id = @Id AND r.org_id = @OrgId AND r.deleted_at IS NULL
             """;
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<Approval>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+        var row = await db.QueryFirstOrDefaultAsync<ApprovalRow>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     public async Task<List<Approval>> ListByRunAsync(string runId, string orgId, CancellationToken ct = default)
@@ -69,31 +70,27 @@ public class ApprovalRepository : IApprovalRepository
             ORDER BY ap.created_at ASC
             """;
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<Approval>(new CommandDefinition(sql, new { RunId = runId, OrgId = orgId }, cancellationToken: ct));
-        return rows.ToList();
+        var rows = await db.QueryAsync<ApprovalRow>(new CommandDefinition(sql, new { RunId = runId, OrgId = orgId }, cancellationToken: ct));
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 
     /// <summary>
-    /// The run's most recent still-pending approval.
-    ///
-    /// The status filter is applied in C#, not SQL, on purpose. Dapper does not apply a registered
-    /// enum TypeHandler when *writing* a parameter (it short-circuits enums to their underlying
-    /// integer before consulting handlers), so `approvals.status` holds the enum's ordinal — not the
-    /// 'pending'/'approved' text the column comment describes. A `status = 'pending'` predicate
-    /// therefore silently matched nothing, which is why this method always returned null once
-    /// approvals actually started being created. Reading through the mapped enum round-trips
-    /// correctly whichever encoding a row was written with, so the comparison is done there.
+    /// The run's most recent still-pending approval. <c>approvals.status</c> holds the documented
+    /// 'pending'/'approved'/... text (ApprovalStatusExtensions.ToDbString, backfilled by
+    /// migrations/0004_enum_string_encoding.sql), so the filter belongs in SQL — before that
+    /// migration the column held the enum's ordinal and this predicate would have matched nothing.
     /// </summary>
     public async Task<Approval?> GetPendingForRunAsync(string runId, CancellationToken ct = default)
     {
         var sql = $"""
             SELECT {SelectColumns} FROM approvals
-            WHERE run_id = @RunId
+            WHERE run_id = @RunId AND status = @Pending
             ORDER BY created_at DESC
             """;
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<Approval>(new CommandDefinition(sql, new { RunId = runId }, cancellationToken: ct));
-        return rows.FirstOrDefault(a => a.Status == ApprovalStatus.Pending);
+        var row = await db.QueryFirstOrDefaultAsync<ApprovalRow>(new CommandDefinition(
+            sql, new { RunId = runId, Pending = ApprovalStatus.Pending.ToDbString() }, cancellationToken: ct));
+        return row?.ToDomain();
     }
 
     public async Task InsertAsync(Approval approval, CancellationToken ct = default)
@@ -111,7 +108,7 @@ public class ApprovalRepository : IApprovalRepository
             """;
 
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, approval, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, ApprovalRow.FromDomain(approval), cancellationToken: ct));
         _logger.Information("Inserted approval {ApprovalId} for run {RunId}", approval.Id, approval.RunId);
     }
 
@@ -127,25 +124,22 @@ public class ApprovalRepository : IApprovalRepository
             """;
 
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, approval, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, ApprovalRow.FromDomain(approval), cancellationToken: ct));
         _logger.Information("Updated approval {ApprovalId} to status {Status}", approval.Id, approval.Status);
     }
 
-    /// <summary>
-    /// Pending approvals past their expiry. As in <see cref="GetPendingForRunAsync"/>, the deadline
-    /// is filtered in SQL and the status in C#, because the persisted status encoding cannot be
-    /// relied on in a predicate.
-    /// </summary>
+    /// <summary>Pending approvals past their expiry — deadline and status both filtered in SQL.</summary>
     public async Task<List<Approval>> ListExpiredPendingAsync(DateTime nowUtc, CancellationToken ct = default)
     {
         var sql = $"""
             SELECT {SelectColumns} FROM approvals
-            WHERE expires_at < @Now
+            WHERE expires_at < @Now AND status = @Pending
             ORDER BY expires_at ASC
             LIMIT 500
             """;
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<Approval>(new CommandDefinition(sql, new { Now = nowUtc }, cancellationToken: ct));
-        return rows.Where(a => a.Status == ApprovalStatus.Pending).ToList();
+        var rows = await db.QueryAsync<ApprovalRow>(new CommandDefinition(
+            sql, new { Now = nowUtc, Pending = ApprovalStatus.Pending.ToDbString() }, cancellationToken: ct));
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 }

@@ -29,49 +29,6 @@ public class JsonTypeHandler<T> : SqlMapper.TypeHandler<T>
     }
 }
 
-/// <summary>Dapper handler mapping RunStatus &lt;-&gt; the lowercase/snake-case DB string.</summary>
-public class RunStatusTypeHandler : SqlMapper.TypeHandler<RunStatus>
-{
-    public override RunStatus Parse(object value) => RunStatusExtensions.FromDbString((string)value);
-    public override void SetValue(IDbDataParameter parameter, RunStatus value) => parameter.Value = value.ToDbString();
-}
-
-public class AgentTypeTypeHandler : SqlMapper.TypeHandler<AgentType>
-{
-    public override AgentType Parse(object value) => AgentTypeExtensions.FromDbString((string)value);
-    public override void SetValue(IDbDataParameter parameter, AgentType value) => parameter.Value = value.ToDbString();
-}
-
-public class TriggeredByTypeTypeHandler : SqlMapper.TypeHandler<TriggeredByType>
-{
-    public override TriggeredByType Parse(object value) => TriggeredByTypeExtensions.FromDbString((string)value);
-    public override void SetValue(IDbDataParameter parameter, TriggeredByType value) => parameter.Value = value.ToDbString();
-}
-
-public class ApprovalTypeTypeHandler : SqlMapper.TypeHandler<ApprovalType>
-{
-    public override ApprovalType Parse(object value) => ApprovalTypeExtensions.FromDbString((string)value);
-    public override void SetValue(IDbDataParameter parameter, ApprovalType value) => parameter.Value = value.ToDbString();
-}
-
-public class ApprovalStatusTypeHandler : SqlMapper.TypeHandler<ApprovalStatus>
-{
-    public override ApprovalStatus Parse(object value) => ApprovalStatusExtensions.FromDbString((string)value);
-    public override void SetValue(IDbDataParameter parameter, ApprovalStatus value) => parameter.Value = value.ToDbString();
-}
-
-public class SecretScopeTypeHandler : SqlMapper.TypeHandler<SecretScope>
-{
-    public override SecretScope Parse(object value) => SecretScopeExtensions.FromDbString((string)value);
-    public override void SetValue(IDbDataParameter parameter, SecretScope value) => parameter.Value = value.ToDbString();
-}
-
-public class UserRoleTypeHandler : SqlMapper.TypeHandler<UserRole>
-{
-    public override UserRole Parse(object value) => UserRoleExtensions.FromDbString((string)value);
-    public override void SetValue(IDbDataParameter parameter, UserRole value) => parameter.Value = value.ToDbString();
-}
-
 public static class DapperBootstrap
 {
     public static void Configure()
@@ -79,13 +36,13 @@ public static class DapperBootstrap
         // Match snake_case DB columns (org_id) to PascalCase CLR properties (OrgId) automatically.
         DefaultTypeMap.MatchNamesWithUnderscores = true;
 
-        SqlMapper.AddTypeHandler(new RunStatusTypeHandler());
-        SqlMapper.AddTypeHandler(new AgentTypeTypeHandler());
-        SqlMapper.AddTypeHandler(new TriggeredByTypeTypeHandler());
-        SqlMapper.AddTypeHandler(new ApprovalTypeTypeHandler());
-        SqlMapper.AddTypeHandler(new ApprovalStatusTypeHandler());
-        SqlMapper.AddTypeHandler(new SecretScopeTypeHandler());
-        SqlMapper.AddTypeHandler(new UserRoleTypeHandler());
+        // NOTE: do NOT add SqlMapper type handlers for the domain enums (RunStatus, UserRole, ...).
+        // Dapper never consults them: writing, it short-circuits an enum parameter to its underlying
+        // integral type before handler lookup (so the column silently gets '14' instead of
+        // 'infra_error'); reading, it goes through Enum.Parse, which cannot produce
+        // RunStatus.AwaitingApproval from 'awaiting_approval'. Seven such handlers existed here and
+        // were dead code. Enum columns are instead mapped explicitly in Repositories/DbRows.cs,
+        // which types them as string and converts via each enum's ToDbString()/FromDbString().
 
         SqlMapper.AddTypeHandler(new JsonTypeHandler<System.Text.Json.Nodes.JsonNode>());
         SqlMapper.AddTypeHandler(new JsonTypeHandler<List<RunHistoryItem>>());
