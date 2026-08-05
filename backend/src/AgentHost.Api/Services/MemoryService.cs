@@ -15,6 +15,14 @@ public interface IMemoryService
 /// <summary>Per-project "dream-like" agentic memory service (spec section 11.2, implemented verbatim).</summary>
 public class MemoryService : IMemoryService
 {
+    /// <summary>
+    /// Upper bound on retained <c>run_history</c> entries. Every terminal run transition now appends
+    /// one (see <see cref="RunStateMachine"/>), so an unbounded list would grow with the project's
+    /// entire run count inside a single jsonb column. Older entries beyond this window are dropped
+    /// here; <see cref="ArchiveOldRunsAsync"/> independently rolls up anything older than 30 days.
+    /// </summary>
+    public const int MaxRunHistoryItems = 200;
+
     private readonly IMemoryRepository _memoryRepository;
     private readonly ILogger _logger;
 
@@ -68,6 +76,9 @@ public class MemoryService : IMemoryService
         if (update.NewRunHistoryItem is not null)
         {
             memory.RunHistory.Add(update.NewRunHistoryItem);
+
+            if (memory.RunHistory.Count > MaxRunHistoryItems)
+                memory.RunHistory.RemoveRange(0, memory.RunHistory.Count - MaxRunHistoryItems);
         }
 
         memory.Patterns = DetectPatterns(memory.RunHistory);
