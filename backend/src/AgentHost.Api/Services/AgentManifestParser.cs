@@ -8,6 +8,41 @@ public interface IAgentManifestParser
 {
     /// <summary>Parses the agent manifest YAML shape described in spec section 6.2.</summary>
     AgentManifest Parse(string yaml);
+
+    /// <summary>
+    /// Parses the container-sandbox extensions of <c>spec.permissions</c> that are not part of the
+    /// spec 6.2 <see cref="AgentManifest"/> shape (see <see cref="AgentContainerPolicy"/>).
+    /// Never throws for a manifest that <see cref="Parse"/> accepts: unknown/missing fields fall
+    /// back to the most restrictive defaults.
+    /// </summary>
+    AgentContainerPolicy ParseContainerPolicy(string yaml);
+}
+
+/// <summary>
+/// Sandbox knobs read from <c>spec.permissions</c> in addition to the spec 6.2 fields:
+///
+/// <code>
+/// spec:
+///   permissions:
+///     network: allowlist
+///     networkAllowlist: ["api.github.com", "registry.npmjs.org"]
+///     writableRootfs: false
+/// </code>
+///
+/// Kept out of <c>Domain/AgentManifest</c> (which mirrors the published spec shape) and resolved
+/// separately by <see cref="ContainerOrchestrator"/> when it builds the container's HostConfig.
+/// </summary>
+/// <param name="NetworkAllowlist">
+/// Hosts the run may reach when <c>permissions.network == "allowlist"</c>. Empty means "no host is
+/// allowed", which the orchestrator treats as a fail-closed no-network run.
+/// </param>
+/// <param name="WritableRootfs">
+/// Explicit opt-in to a writable container root filesystem. Defaults to false: containers get a
+/// read-only rootfs plus a writable <c>/workspace</c> bind and a <c>/tmp</c> tmpfs.
+/// </param>
+public record AgentContainerPolicy(IReadOnlyList<string> NetworkAllowlist, bool WritableRootfs)
+{
+    public static readonly AgentContainerPolicy Restrictive = new(Array.Empty<string>(), false);
 }
 
 public class AgentManifestParser : IAgentManifestParser
@@ -104,6 +139,36 @@ public class AgentManifestParser : IAgentManifestParser
         return manifest;
     }
 
+    public AgentContainerPolicy ParseContainerPolicy(string yaml)
+    {
+        if (string.IsNullOrWhiteSpace(yaml))
+            return AgentContainerPolicy.Restrictive;
+
+        RawManifest? raw;
+        try
+        {
+            raw = _deserializer.Deserialize<RawManifest>(yaml);
+        }
+        catch
+        {
+            // Parse() is the validating entry point; here a malformed manifest simply yields the
+            // most restrictive sandbox rather than a second, differently-shaped failure.
+            return AgentContainerPolicy.Restrictive;
+        }
+
+        var permissions = raw?.Spec?.Permissions;
+        if (permissions is null)
+            return AgentContainerPolicy.Restrictive;
+
+        var allowlist = (permissions.NetworkAllowlist ?? new List<string>())
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Select(h => h.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new AgentContainerPolicy(allowlist, permissions.WritableRootfs ?? false);
+    }
+
     // Loosely-typed mirror of the YAML shape; every field is optional at this stage so that
     // partial/legacy manifests still parse, with validation/defaulting applied above.
     private class RawManifest
@@ -147,6 +212,10 @@ public class AgentManifestParser : IAgentManifestParser
         public string? Network { get; set; }
         public List<string>? Secrets { get; set; }
         public bool? Docker { get; set; }
+
+        // Container-sandbox extensions; surfaced through ParseContainerPolicy, not AgentManifest.
+        public List<string>? NetworkAllowlist { get; set; }
+        public bool? WritableRootfs { get; set; }
     }
 
     private class RawRuntime

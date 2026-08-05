@@ -19,10 +19,48 @@ that one run.
 | `AGENTHOST_INPUTS` | JSON document with the run's validated inputs. |
 | `AGENTHOST_PROTOCOL_VERSION` | `1.0`. |
 | `AGENTHOST_RUN_TOKEN` | Bearer token for the callback API (see below). |
-| `SECRET_<NAME>` | One per secret the manifest's `spec.permissions.secrets` grants. Also mounted read-only at `/run/secrets/<NAME>`. |
 | `AGENT_<KEY>` | One per `spec.external.config` entry, for non-OCI agent types. |
+| `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` | Only when `spec.permissions.network: allowlist`. All outbound HTTP(S) must go through this proxy — it is what enforces the allowlist. |
+| `AGENTHOST_NETWORK_ALLOWLIST` | Only for `network: allowlist`: comma-separated hosts the run may reach. Informational. |
 
-The workspace is bind-mounted at `/workspace`; its host path is recorded in `runs.workspace_path`.
+### Secrets are files, not environment variables
+
+**Secrets are never exported as `SECRET_<NAME>` environment variables** (they were in earlier
+builds; that is gone). Environment variables are readable by anyone who can run `docker inspect`
+on the container and by every process inside it via `/proc/1/environ`, so shipping secrets that way
+defeated the read-only secrets mount.
+
+Read each secret from a file instead:
+
+```
+/run/secrets/<NAME>
+```
+
+One file per secret granted by the manifest's `spec.permissions.secrets`, mounted read-only.
+Names are exactly the secret names from the manifest — no `SECRET_` prefix, no case change. The
+file contains the raw secret value with no trailing newline added.
+
+```bash
+TOKEN="$(cat /run/secrets/GITHUB_TOKEN)"
+```
+
+The host deletes the whole `/run/secrets` backing directory as soon as the container exits, so a
+secret is only readable for the lifetime of the run.
+
+### Filesystem
+
+The workspace is bind-mounted read-write at `/workspace`; its host path is recorded in
+`runs.workspace_path`. It is the only durable place an agent may write.
+
+The container root filesystem is **read-only** by default, with a small `tmpfs` mounted at `/tmp`.
+An agent that genuinely cannot work under a read-only rootfs must opt in explicitly in its
+manifest:
+
+```yaml
+spec:
+  permissions:
+    writableRootfs: true
+```
 
 ## 2. Authentication
 

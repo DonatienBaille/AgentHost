@@ -163,6 +163,9 @@ builder.Services.AddAgentRunAuthentication(builder.Configuration);
 builder.Services.AddSingleton<RunWatchdog>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RunWatchdog>());
 
+// ---- On-disk retention: orphaned plaintext secrets, expired run workspaces/artifacts ----
+builder.Services.AddHostedService<RunDataJanitor>();
+
 // ---- SignalR ----
 // AddJsonProtocol uses its own JsonSerializerOptions, separate from ConfigureHttpJsonOptions
 // below — without this, hub payloads (Run/RunEvent broadcasts) would serialize enums as
