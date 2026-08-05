@@ -23,10 +23,20 @@ export class SecretsComponent implements OnInit {
   readonly isLoading = this.secretService.isLoading;
   readonly error = this.secretService.error;
 
+  /** Every secret route is maintainer+; below that the server 403s, so don't offer the actions. */
+  readonly canManage = this.authService.isMaintainerOrAbove;
+
   readonly showForm = signal(false);
   readonly isSubmitting = signal(false);
   readonly submitError = signal<string | null>(null);
   readonly deletingId = signal<string | null>(null);
+
+  /** id of the secret currently being rotated inline, if any. */
+  readonly rotatingId = signal<string | null>(null);
+  readonly rotateValue = signal('');
+  readonly isRotating = signal(false);
+  readonly rotateError = signal<string | null>(null);
+  readonly rotatedId = signal<string | null>(null);
 
   readonly form = this.fb.group({
     name: ['', [Validators.required]],
@@ -36,10 +46,13 @@ export class SecretsComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    const orgId = this.authService.currentUser()?.orgId;
-    if (orgId) {
-      this.secretService.listSecrets(orgId);
+    if (this.canManage()) {
+      this.secretService.listSecrets();
     }
+  }
+
+  reload(): void {
+    this.secretService.listSecrets();
   }
 
   toggleForm(): void {
@@ -47,8 +60,7 @@ export class SecretsComponent implements OnInit {
   }
 
   async submit(): Promise<void> {
-    const orgId = this.authService.currentUser()?.orgId;
-    if (!orgId || this.form.invalid) {
+    if (this.form.invalid) {
       this.form.markAllAsTouched();
       return;
     }
@@ -58,7 +70,6 @@ export class SecretsComponent implements OnInit {
     try {
       const { name, value, scope, projectId } = this.form.getRawValue();
       await this.secretService.createSecret({
-        orgId,
         name: name!,
         value: value!,
         scope: scope!,
@@ -66,10 +77,48 @@ export class SecretsComponent implements OnInit {
       });
       this.form.reset({ scope: 'org' });
       this.showForm.set(false);
-    } catch (err) {
+    } catch {
       this.submitError.set('adminSecrets.createError');
     } finally {
       this.isSubmitting.set(false);
+    }
+  }
+
+  startRotate(id: string): void {
+    this.rotatingId.set(id);
+    this.rotateValue.set('');
+    this.rotateError.set(null);
+    this.rotatedId.set(null);
+  }
+
+  cancelRotate(): void {
+    this.rotatingId.set(null);
+    this.rotateValue.set('');
+    this.rotateError.set(null);
+  }
+
+  onRotateValueInput(value: string): void {
+    this.rotateValue.set(value);
+  }
+
+  async confirmRotate(): Promise<void> {
+    const id = this.rotatingId();
+    const value = this.rotateValue();
+    if (!id || !value) {
+      return;
+    }
+
+    this.isRotating.set(true);
+    this.rotateError.set(null);
+    try {
+      await this.secretService.rotateSecret(id, value);
+      this.rotatingId.set(null);
+      this.rotateValue.set('');
+      this.rotatedId.set(id);
+    } catch {
+      this.rotateError.set('adminSecrets.rotateError');
+    } finally {
+      this.isRotating.set(false);
     }
   }
 
@@ -78,7 +127,7 @@ export class SecretsComponent implements OnInit {
     try {
       await this.secretService.deleteSecret(id);
     } catch {
-      // surfaced via secretService.error already
+      // surfaced globally by the error interceptor
     } finally {
       this.deletingId.set(null);
     }

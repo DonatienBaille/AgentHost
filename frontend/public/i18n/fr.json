@@ -16,7 +16,8 @@
     "cancel": "Annuler",
     "create": "Créer",
     "saving": "Enregistrement…",
-    "delete": "Supprimer"
+    "delete": "Supprimer",
+    "retry": "Réessayer"
   },
   "status": {
     "pending": "En attente",
@@ -186,7 +187,16 @@
     "value": "Valeur",
     "lastUsed": "Dernière utilisation",
     "empty": "Aucun secret pour le moment.",
-    "createError": "Échec de la création du secret."
+    "createError": "Échec de la création du secret.",
+    "loadError": "Impossible de charger les secrets.",
+    "valueNeverReturned": "Les valeurs ne sont jamais renvoyées par l'API : seules les métadonnées sont affichées.",
+    "forbidden": "Seuls les mainteneurs et les propriétaires peuvent gérer les secrets.",
+    "updatedAt": "Mis à jour le",
+    "rotate": "Renouveler",
+    "newValue": "Nouvelle valeur",
+    "confirmRotate": "Confirmer le renouvellement",
+    "rotateError": "Le renouvellement du secret a échoué.",
+    "rotated": "renouvelé"
   },
   "adminWebhooks": {
     "title": "Webhooks",
@@ -208,5 +218,11 @@
     "resource": "Ressource",
     "timestamp": "Horodatage",
     "empty": "Aucune entrée dans le journal d'audit."
+  },
+  "errors": {
+    "network": "Erreur réseau : le serveur est injoignable.",
+    "requestFailed": "Échec de la requête",
+    "forbidden": "Permissions insuffisantes : votre rôle ne permet pas cette action.",
+    "sessionExpired": "Votre session a expiré. Veuillez vous reconnecter."
   }
 }

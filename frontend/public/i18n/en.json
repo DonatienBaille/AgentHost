@@ -16,7 +16,8 @@
     "cancel": "Cancel",
     "create": "Create",
     "saving": "Saving…",
-    "delete": "Delete"
+    "delete": "Delete",
+    "retry": "Retry"
   },
   "status": {
     "pending": "Pending",
@@ -186,7 +187,16 @@
     "value": "Value",
     "lastUsed": "Last used",
     "empty": "No secrets yet.",
-    "createError": "Failed to create secret."
+    "createError": "Failed to create secret.",
+    "loadError": "Unable to load secrets.",
+    "valueNeverReturned": "Values are never returned by the API — only metadata is shown.",
+    "forbidden": "Only maintainers and owners can manage secrets.",
+    "updatedAt": "Updated",
+    "rotate": "Rotate",
+    "newValue": "New value",
+    "confirmRotate": "Confirm rotation",
+    "rotateError": "Failed to rotate the secret.",
+    "rotated": "rotated"
   },
   "adminWebhooks": {
     "title": "Webhooks",
@@ -208,5 +218,11 @@
     "resource": "Resource",
     "timestamp": "Timestamp",
     "empty": "No audit log entries yet."
+  },
+  "errors": {
+    "network": "Network error: unable to reach the server.",
+    "requestFailed": "Request failed",
+    "forbidden": "Insufficient permissions: your role does not allow this action.",
+    "sessionExpired": "Your session has expired. Please sign in again."
   }
 }
