@@ -1,0 +1,126 @@
+<!-- src/app/components/project-memory/project-memory.component.html -->
+
+<div class="space-y-6">
+  @if (isLoading()) {
+    <div class="flex justify-center py-8">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+  }
+
+  @if (error()) {
+    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4">
+      <p class="text-red-200">{{ error() }}</p>
+    </div>
+  }
+
+  @if (memory(); as mem) {
+    <!-- Context card -->
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+      <h3 class="text-lg font-semibold mb-2">{{ mem.context.name || ('memory.context' | translate) }}</h3>
+      @if (mem.context.description) {
+        <p class="text-gray-400 text-sm mb-3">{{ mem.context.description }}</p>
+      }
+
+      @if (mem.context.technologies.length) {
+        <div class="flex flex-wrap gap-2 mb-3">
+          @for (tech of mem.context.technologies; track tech) {
+            <span class="px-2 py-1 bg-blue-900/50 text-blue-200 border border-blue-700 rounded text-xs">
+              {{ tech }}
+            </span>
+          }
+        </div>
+      }
+
+      @if (mem.context.recentDecisions.length) {
+        <div>
+          <div class="text-sm text-gray-400 mb-1">{{ 'memory.recentDecisions' | translate }}</div>
+          <ul class="list-disc list-inside text-sm text-gray-300 space-y-1">
+            @for (decision of mem.context.recentDecisions; track decision) {
+              <li>{{ decision }}</li>
+            }
+          </ul>
+        </div>
+      }
+    </div>
+
+    <!-- Patterns -->
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+      <h3 class="font-semibold mb-3">{{ 'memory.patterns' | translate }}</h3>
+      @if (mem.patterns.length === 0) {
+        <p class="text-gray-500 text-sm">{{ 'memory.noPatterns' | translate }}</p>
+      }
+      <div class="space-y-2">
+        @for (pattern of mem.patterns; track pattern.name) {
+          <div class="flex items-center justify-between text-sm border-b border-gray-700 pb-2 last:border-0">
+            <span class="text-gray-200">{{ pattern.name }}</span>
+            <span class="text-gray-500">
+              &times;{{ pattern.frequency }} &middot; {{ pattern.lastSeen | date: 'short' }}
+            </span>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Learnings -->
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+      <h3 class="font-semibold mb-3">{{ 'memory.learnings' | translate }}</h3>
+      @if (mem.learnings.length === 0) {
+        <p class="text-gray-500 text-sm">{{ 'memory.noLearnings' | translate }}</p>
+      }
+      <div class="space-y-3">
+        @for (learning of mem.learnings; track learning.id) {
+          <div class="border-b border-gray-700 pb-3 last:border-0">
+            <div class="font-medium text-gray-100">{{ learning.title }}</div>
+            <p class="text-sm text-gray-400 mt-1">{{ learning.description }}</p>
+            @if (learning.appliedByAgents.length) {
+              <p class="text-xs text-gray-500 mt-1">
+                {{ 'memory.appliedBy' | translate }}: {{ learning.appliedByAgents.join(', ') }}
+              </p>
+            }
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Notes -->
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+      <h3 class="font-semibold mb-3">{{ 'memory.notes' | translate }}</h3>
+      @if (mem.notes.length === 0) {
+        <p class="text-gray-500 text-sm">{{ 'memory.noNotes' | translate }}</p>
+      }
+      <div class="space-y-2">
+        @for (note of mem.notes; track note.id) {
+          <div class="text-sm border-b border-gray-700 pb-2 last:border-0">
+            <span class="text-gray-500">[{{ note.timestamp | date: 'short' }}]</span>
+            <span class="text-blue-400 ml-1">{{ note.agentName }}</span>
+            <span class="text-gray-300 ml-1">{{ note.text }}</span>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Run history -->
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+      <h3 class="font-semibold mb-3">{{ 'memory.runHistory' | translate }}</h3>
+      @if (mem.runHistory.length === 0) {
+        <p class="text-gray-500 text-sm">{{ 'memory.noRunHistory' | translate }}</p>
+      }
+      <div class="space-y-2">
+        @for (item of mem.runHistory; track item.runId) {
+          <a [routerLink]="['/runs', item.runId]" class="flex items-center justify-between text-sm border-b border-gray-700 pb-2 last:border-0 hover:bg-gray-750 rounded px-1 -mx-1">
+            <div>
+              <div class="text-gray-200">{{ item.agentName }}</div>
+              <div class="text-gray-500 text-xs">{{ item.summary }}</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded text-xs" [class]="outcomeBadgeClass(item.outcome)">
+                {{ item.outcome }}
+              </span>
+              <span class="text-gray-500 text-xs">{{ item.timestamp | date: 'short' }}</span>
+            </div>
+          </a>
+        }
+      </div>
+    </div>
+  }
+</div>

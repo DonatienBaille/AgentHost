@@ -1,0 +1,87 @@
+{
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "runs": "Runs"
+  },
+  "common": {
+    "refresh": "Actualiser"
+  },
+  "status": {
+    "pending": "En attente",
+    "queued": "En file",
+    "provisioning": "Provisionnement",
+    "preparing": "Préparation",
+    "running": "En cours",
+    "awaiting_approval": "Attente d'approbation",
+    "awaiting_input": "Attente de réponse",
+    "finalizing": "Finalisation",
+    "succeeded": "Réussi",
+    "failed": "Échoué",
+    "cancelled": "Annulé",
+    "timed_out": "Délai dépassé",
+    "budget_exceeded": "Budget dépassé",
+    "rejected": "Rejeté",
+    "infra_error": "Erreur infra"
+  },
+  "runs": {
+    "title": "Runs",
+    "total": "Total",
+    "successRate": "Taux de réussite",
+    "failed": "Échoués",
+    "duration": "Durée",
+    "empty": "Aucun run pour le moment. Créez-en un pour commencer."
+  },
+  "runDetail": {
+    "loading": "Chargement du run…",
+    "approveNotePlaceholder": "Note (optionnelle)",
+    "approve": "Approuver",
+    "cancel": "Annuler",
+    "events": "Événements",
+    "noEvents": "Aucun événement pour l'instant",
+    "status": "Statut",
+    "duration": "Durée",
+    "cost": "Coût",
+    "created": "Créé le"
+  },
+  "newRun": {
+    "title": "Nouveau run",
+    "selectAgent": "Choisir un agent",
+    "chooseAgent": "— Sélectionner un agent —",
+    "noInputs": "Cet agent ne nécessite aucune entrée.",
+    "submitting": "Création…",
+    "submit": "Lancer le run",
+    "pickAgentFirst": "Sélectionnez un agent pour afficher le formulaire d'entrées."
+  },
+  "memory": {
+    "context": "Contexte du projet",
+    "recentDecisions": "Décisions récentes",
+    "patterns": "Patterns détectés",
+    "noPatterns": "Aucun pattern détecté pour le moment.",
+    "learnings": "Apprentissages",
+    "noLearnings": "Aucun apprentissage enregistré.",
+    "appliedBy": "Appliqué par",
+    "notes": "Notes des agents",
+    "noNotes": "Aucune note pour le moment.",
+    "runHistory": "Historique des runs",
+    "noRunHistory": "Aucun run dans l'historique."
+  },
+  "dashboard": {
+    "title": "Tableau de bord",
+    "subtitle": "Vue d'ensemble de l'activité de vos agents",
+    "totalRuns": "Runs au total",
+    "successRate": "Taux de réussite",
+    "active": "Actifs",
+    "failed": "Échoués",
+    "recentRuns": "Runs récents",
+    "viewAll": "Tout voir",
+    "noRuns": "Aucun run pour le moment.",
+    "projects": "Projets",
+    "noProjects": "Aucun projet pour le moment."
+  },
+  "projectDetail": {
+    "newRun": "Nouveau run",
+    "recentRuns": "Runs récents",
+    "noRuns": "Aucun run pour ce projet.",
+    "memory": "Mémoire du projet"
+  }
+}

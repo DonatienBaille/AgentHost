@@ -1,0 +1,86 @@
+<!-- src/app/components/new-run-form/new-run-form.component.html -->
+
+<div class="p-6 max-w-2xl mx-auto">
+  <h1 class="text-3xl font-bold mb-6">{{ 'newRun.title' | translate }}</h1>
+
+  <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 space-y-6">
+    <!-- Agent selector -->
+    <div>
+      <label class="block text-sm text-gray-400 mb-1" for="agent-select">
+        {{ 'newRun.selectAgent' | translate }}
+      </label>
+      <select
+        id="agent-select"
+        class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded"
+        (change)="onAgentChange($any($event.target).value)"
+      >
+        <option value="">{{ 'newRun.chooseAgent' | translate }}</option>
+        @for (agent of projectAgents(); track agent.id) {
+          <option [value]="agent.id">{{ agent.name }}</option>
+        }
+      </select>
+    </div>
+
+    @if (selectedAgent()) {
+      <form [formGroup]="form" (ngSubmit)="submit()" class="space-y-4">
+        @for (field of fields(); track field.key) {
+          <div>
+            <label class="block text-sm text-gray-300 mb-1" [for]="field.key">
+              {{ field.schema.title || field.key }}
+              @if (field.required) {
+                <span class="text-red-400">*</span>
+              }
+            </label>
+
+            @if (field.schema.type === 'boolean') {
+              <input
+                type="checkbox"
+                [id]="field.key"
+                [formControlName]="field.key"
+                class="h-4 w-4 rounded border-gray-700 bg-gray-900"
+              />
+            } @else if (isNumberField(field.schema)) {
+              <input
+                type="number"
+                [id]="field.key"
+                [formControlName]="field.key"
+                class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded"
+              />
+            } @else {
+              <input
+                type="text"
+                [id]="field.key"
+                [formControlName]="field.key"
+                class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded"
+              />
+            }
+
+            @if (field.schema.description) {
+              <p class="text-xs text-gray-500 mt-1">{{ field.schema.description }}</p>
+            }
+          </div>
+        }
+
+        @if (fields().length === 0) {
+          <p class="text-gray-400 text-sm">{{ 'newRun.noInputs' | translate }}</p>
+        }
+
+        @if (submitError()) {
+          <div class="bg-red-900/50 border border-red-700 rounded-lg p-3">
+            <p class="text-red-200 text-sm">{{ submitError() }}</p>
+          </div>
+        }
+
+        <button
+          type="submit"
+          class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded font-medium transition"
+          [disabled]="isSubmitting() || form.invalid"
+        >
+          {{ isSubmitting() ? ('newRun.submitting' | translate) : ('newRun.submit' | translate) }}
+        </button>
+      </form>
+    } @else {
+      <p class="text-gray-400 text-sm">{{ 'newRun.pickAgentFirst' | translate }}</p>
+    }
+  </div>
+</div>

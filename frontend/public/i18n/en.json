@@ -1,0 +1,87 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "runs": "Runs"
+  },
+  "common": {
+    "refresh": "Refresh"
+  },
+  "status": {
+    "pending": "Pending",
+    "queued": "Queued",
+    "provisioning": "Provisioning",
+    "preparing": "Preparing",
+    "running": "Running",
+    "awaiting_approval": "Awaiting approval",
+    "awaiting_input": "Awaiting input",
+    "finalizing": "Finalizing",
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "timed_out": "Timed out",
+    "budget_exceeded": "Budget exceeded",
+    "rejected": "Rejected",
+    "infra_error": "Infra error"
+  },
+  "runs": {
+    "title": "Runs",
+    "total": "Total",
+    "successRate": "Success rate",
+    "failed": "Failed",
+    "duration": "Duration",
+    "empty": "No runs yet. Create one to get started."
+  },
+  "runDetail": {
+    "loading": "Loading run…",
+    "approveNotePlaceholder": "Note (optional)",
+    "approve": "Approve",
+    "cancel": "Cancel",
+    "events": "Events",
+    "noEvents": "No events yet",
+    "status": "Status",
+    "duration": "Duration",
+    "cost": "Cost",
+    "created": "Created"
+  },
+  "newRun": {
+    "title": "New run",
+    "selectAgent": "Select an agent",
+    "chooseAgent": "— Choose an agent —",
+    "noInputs": "This agent has no inputs.",
+    "submitting": "Creating…",
+    "submit": "Launch run",
+    "pickAgentFirst": "Select an agent to show its input form."
+  },
+  "memory": {
+    "context": "Project context",
+    "recentDecisions": "Recent decisions",
+    "patterns": "Detected patterns",
+    "noPatterns": "No patterns detected yet.",
+    "learnings": "Learnings",
+    "noLearnings": "No learnings recorded yet.",
+    "appliedBy": "Applied by",
+    "notes": "Agent notes",
+    "noNotes": "No notes yet.",
+    "runHistory": "Run history",
+    "noRunHistory": "No runs in history."
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "Overview of your agents' activity",
+    "totalRuns": "Total runs",
+    "successRate": "Success rate",
+    "active": "Active",
+    "failed": "Failed",
+    "recentRuns": "Recent runs",
+    "viewAll": "View all",
+    "noRuns": "No runs yet.",
+    "projects": "Projects",
+    "noProjects": "No projects yet."
+  },
+  "projectDetail": {
+    "newRun": "New run",
+    "recentRuns": "Recent runs",
+    "noRuns": "No runs for this project.",
+    "memory": "Project memory"
+  }
+}

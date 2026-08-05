@@ -1,0 +1,70 @@
+<!-- src/app/components/runs-list/runs-list.component.html -->
+
+<div class="p-6">
+  <!-- Header -->
+  <div class="mb-8 flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1 class="text-3xl font-bold mb-2">{{ 'runs.title' | translate }}</h1>
+      <p class="text-gray-400">
+        {{ 'runs.total' | translate }}: {{ runs().length }} &middot;
+        {{ 'runs.successRate' | translate }}: {{ successRate() | number: '1.0-0' }}% &middot;
+        {{ 'runs.failed' | translate }}: {{ failedRuns() }}
+      </p>
+    </div>
+    <button
+      class="px-3 py-2 text-sm rounded bg-gray-800 border border-gray-700 hover:border-blue-500 transition"
+      (click)="reload()"
+    >
+      {{ 'common.refresh' | translate }}
+    </button>
+  </div>
+
+  <!-- Loading state -->
+  @if (isLoading()) {
+    <div class="flex justify-center py-12">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+    </div>
+  }
+
+  <!-- Error state -->
+  @if (error()) {
+    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-4">
+      <p class="text-red-200">{{ error() }}</p>
+    </div>
+  }
+
+  <!-- Runs list -->
+  @if (!isLoading()) {
+    <div class="grid gap-4">
+      @for (run of runs(); track run.id) {
+        <a
+          [routerLink]="['/runs', run.id]"
+          (click)="selectRun(run.id)"
+          class="block bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-blue-500 hover:bg-gray-750 transition cursor-pointer"
+        >
+          <div class="flex justify-between items-start gap-4">
+            <div>
+              <div class="font-mono text-sm text-gray-400">#{{ run.number }}</div>
+              <div class="text-lg font-semibold mt-1">{{ run.agentId }}</div>
+            </div>
+            <div class="px-2 py-1 rounded text-xs font-semibold uppercase tracking-wide" [class]="statusBadgeClass(run.status)">
+              {{ 'status.' + run.status | translate }}
+            </div>
+          </div>
+          <p class="text-gray-400 text-sm mt-3">{{ run.createdAt | date: 'medium' }}</p>
+          @if (run.durationMs) {
+            <p class="text-gray-500 text-xs mt-2">
+              {{ 'runs.duration' | translate }}: {{ run.durationMs / 1000 | number: '1.0-0' }}s
+            </p>
+          }
+        </a>
+      }
+    </div>
+
+    @if (runs().length === 0 && !error()) {
+      <div class="text-center py-12">
+        <p class="text-gray-400">{{ 'runs.empty' | translate }}</p>
+      </div>
+    }
+  }
+</div>

@@ -1,0 +1,37 @@
+<div class="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white">
+  <nav class="sticky top-0 z-20 bg-gray-900/95 backdrop-blur border-b border-gray-700 px-6 py-3">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <a routerLink="/" class="text-lg font-bold flex items-center gap-2">
+        <span>Agent Host</span>
+      </a>
+
+      <div class="flex items-center gap-4 text-sm">
+        <a routerLink="/" routerLinkActive="text-blue-400" [routerLinkActiveOptions]="{ exact: true }" class="text-gray-300 hover:text-white transition">
+          {{ 'nav.dashboard' | translate }}
+        </a>
+        <a routerLink="/runs" routerLinkActive="text-blue-400" class="text-gray-300 hover:text-white transition">
+          {{ 'nav.runs' | translate }}
+        </a>
+
+        <div class="flex items-center gap-1 ml-4 border-l border-gray-700 pl-4">
+          @for (lang of languages; track lang) {
+            <button
+              type="button"
+              class="px-2 py-1 rounded text-xs uppercase transition"
+              [class.bg-blue-600]="currentLanguage() === lang"
+              [class.text-white]="currentLanguage() === lang"
+              [class.text-gray-400]="currentLanguage() !== lang"
+              (click)="useLanguage(lang)"
+            >
+              {{ lang }}
+            </button>
+          }
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <router-outlet />
+  </main>
+</div>
