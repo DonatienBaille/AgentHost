@@ -38,6 +38,11 @@ builder.Services.AddSingleton(Log.Logger);
 DapperBootstrap.Configure();
 
 // ---- Infrastructure ----
+// ICallerContext exposes the *authenticated* caller's org/user/role. Authorization decisions
+// must be based on it, never on an orgId/userId taken from the request itself.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICallerContext, CallerContext>();
+
 builder.Services.AddSingleton<IDbConnectionFactory, NpgsqlConnectionFactory>();
 builder.Services.AddSingleton(sp => new MigrationRunner(
     builder.Configuration, sp.GetRequiredService<IHostEnvironment>(), sp.GetRequiredService<Serilog.ILogger>()));
