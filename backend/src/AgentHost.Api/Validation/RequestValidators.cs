@@ -152,3 +152,24 @@ public class RefreshRequestValidator : AbstractValidator<RefreshRequest>
         RuleFor(x => x.RefreshToken).NotEmpty();
     }
 }
+
+public class CreateInvitationRequestValidator : AbstractValidator<CreateInvitationRequest>
+{
+    public CreateInvitationRequestValidator()
+    {
+        RuleFor(x => x.Email).NotEmpty().EmailAddress();
+    }
+}
+
+/// <summary>
+/// The invitee picks their own password, so it must clear exactly the same bar as signup — this is
+/// one of the five entry points where a password is set.
+/// </summary>
+public class AcceptInvitationRequestValidator : AbstractValidator<AcceptInvitationRequest>
+{
+    public AcceptInvitationRequestValidator()
+    {
+        RuleFor(x => x.Token).NotEmpty();
+        RuleFor(x => x.Password).Password();
+    }
+}

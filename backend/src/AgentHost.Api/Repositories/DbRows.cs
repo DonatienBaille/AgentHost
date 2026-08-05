@@ -349,3 +349,53 @@ internal sealed class UserRow
         DeletedAt = DeletedAt,
     };
 }
+
+/// <summary>
+/// Row shape for `invitations`. <c>role</c> is a string here for the reason documented at the top
+/// of this file: handing Dapper a CLR enum writes its ordinal, which the table's
+/// <c>chk_invitations_role</c> CHECK constraint rejects outright.
+/// </summary>
+internal sealed class InvitationRow
+{
+    public string Id { get; set; } = string.Empty;
+    public string OrgId { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+
+    public string Role { get; set; } = string.Empty;
+
+    public string TokenHash { get; set; } = string.Empty;
+    public string InvitedByUserId { get; set; } = string.Empty;
+
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? AcceptedAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+
+    public static InvitationRow FromDomain(Invitation invitation) => new()
+    {
+        Id = invitation.Id,
+        OrgId = invitation.OrgId,
+        Email = invitation.Email,
+        Role = invitation.Role.ToDbString(),
+        TokenHash = invitation.TokenHash,
+        InvitedByUserId = invitation.InvitedByUserId,
+        ExpiresAt = invitation.ExpiresAt,
+        AcceptedAt = invitation.AcceptedAt,
+        RevokedAt = invitation.RevokedAt,
+        CreatedAt = invitation.CreatedAt,
+    };
+
+    public Invitation ToDomain() => new()
+    {
+        Id = Id,
+        OrgId = OrgId,
+        Email = Email,
+        Role = UserRoleExtensions.FromDbString(Role),
+        TokenHash = TokenHash,
+        InvitedByUserId = InvitedByUserId,
+        ExpiresAt = ExpiresAt,
+        AcceptedAt = AcceptedAt,
+        RevokedAt = RevokedAt,
+        CreatedAt = CreatedAt,
+    };
+}

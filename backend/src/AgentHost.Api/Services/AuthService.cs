@@ -27,8 +27,8 @@ public interface IAuthService
 
 /// <summary>
 /// Self-service signup (creates a new org + owner user), login, and the refresh-token lifecycle.
-/// There is no invite/reset flow yet — additional users are added via POST /api/users by an
-/// owner/maintainer, always inside their own organization.
+/// Members can also be added by invitation (see <see cref="InvitationService"/>) or directly via
+/// POST /api/users by an owner/maintainer, always inside their own organization.
 ///
 /// Token model: a short-lived stateless JWT access token plus a long-lived, persisted, revocable
 /// refresh token. Only a SHA-256 hash of the refresh token is stored — the raw value is handed to
@@ -38,26 +38,23 @@ public interface IAuthService
 /// </summary>
 public class AuthService : IAuthService
 {
-    /// <summary>How long a refresh token stays usable if it is never rotated.</summary>
-    private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(14);
-
     private readonly IOrganizationRepository _orgRepository;
     private readonly IUserRepository _userRepository;
     private readonly IRefreshTokenRepository _refreshTokenRepository;
-    private readonly IJwtTokenService _tokenService;
+    private readonly IAuthTokenIssuer _tokenIssuer;
     private readonly bool _allowSelfRegistration;
 
     public AuthService(
         IOrganizationRepository orgRepository,
         IUserRepository userRepository,
         IRefreshTokenRepository refreshTokenRepository,
-        IJwtTokenService tokenService,
+        IAuthTokenIssuer tokenIssuer,
         IConfiguration config)
     {
         _orgRepository = orgRepository;
         _userRepository = userRepository;
         _refreshTokenRepository = refreshTokenRepository;
-        _tokenService = tokenService;
+        _tokenIssuer = tokenIssuer;
 
         // Absent key => allowed, preserving the historical behaviour for deployments that have not
         // added the setting yet. appsettings.json ships it explicitly so it is discoverable.
@@ -101,7 +98,7 @@ public class AuthService : IAuthService
         };
         await _userRepository.InsertAsync(user, ct);
 
-        var (response, _) = await IssuePairAsync(user, ct);
+        var (response, _) = await _tokenIssuer.IssueAsync(user, ct);
         return response;
     }
 
@@ -111,7 +108,7 @@ public class AuthService : IAuthService
         if (user is null || !PasswordHasher.Verify(req.Password, user.PasswordHash))
             return null;
 
-        var (response, _) = await IssuePairAsync(user, ct);
+        var (response, _) = await _tokenIssuer.IssueAsync(user, ct);
         return response;
     }
 
@@ -119,7 +116,7 @@ public class AuthService : IAuthService
     {
         if (string.IsNullOrWhiteSpace(refreshToken)) return null;
 
-        var stored = await _refreshTokenRepository.GetByHashAsync(HashToken(refreshToken), ct);
+        var stored = await _refreshTokenRepository.GetByHashAsync(OpaqueToken.Hash(refreshToken), ct);
         if (stored is null) return null;
 
         if (!stored.IsActive(DateTime.UtcNow))
@@ -141,7 +138,7 @@ public class AuthService : IAuthService
             return null;
         }
 
-        var (response, newTokenId) = await IssuePairAsync(user, ct);
+        var (response, newTokenId) = await _tokenIssuer.IssueAsync(user, ct);
         await _refreshTokenRepository.RevokeAsync(stored.Id, newTokenId, ct);
         return response;
     }
@@ -149,39 +146,4 @@ public class AuthService : IAuthService
     public Task<int> LogoutAsync(string userId, CancellationToken ct = default) =>
         _refreshTokenRepository.RevokeAllForUserAsync(userId, ct);
 
-    private async Task<(AuthResponse Response, string RefreshTokenId)> IssuePairAsync(User user, CancellationToken ct)
-    {
-        var rawRefreshToken = GenerateRefreshTokenValue();
-        var now = DateTime.UtcNow;
-
-        var record = new RefreshToken
-        {
-            Id = UlidGenerator.NewUlid(),
-            UserId = user.Id,
-            OrgId = user.OrgId,
-            TokenHash = HashToken(rawRefreshToken),
-            ExpiresAt = now.Add(RefreshTokenLifetime),
-            CreatedAt = now,
-        };
-
-        await _refreshTokenRepository.InsertAsync(record, ct);
-
-        var response = new AuthResponse
-        {
-            Token = _tokenService.GenerateToken(user),
-            RefreshToken = rawRefreshToken,
-            ExpiresInSeconds = _tokenService.AccessTokenLifetimeMinutes * 60,
-            User = user,
-        };
-
-        return (response, record.Id);
-    }
-
-    /// <summary>256 bits of CSPRNG entropy, URL-safe base64 so it survives headers and query strings.</summary>
-    private static string GenerateRefreshTokenValue() =>
-        Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
-            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
-
-    private static string HashToken(string rawToken) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken))).ToLowerInvariant();
 }
