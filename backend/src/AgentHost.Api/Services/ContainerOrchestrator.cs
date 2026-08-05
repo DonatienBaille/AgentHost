@@ -2,6 +2,7 @@ using System.Text.Json;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 using AgentHost.Api.Domain;
+using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -16,7 +17,12 @@ public interface IContainerOrchestrator
 }
 
 /// <summary>
-/// Docker-based agent orchestrator (spec section 7.1). Applies the section 13 threat-model
+/// Container-based agent orchestrator (spec section 7.1). Drives any engine that speaks the Docker
+/// REST API — Docker itself and Podman's compat service; the endpoint is resolved by
+/// <see cref="Infrastructure.ContainerRuntimeEndpoint"/> and no code path branches on which one it
+/// is. Bind-mount sources are translated to the daemon's view of the filesystem by
+/// <see cref="Infrastructure.ContainerPathMapper"/>, which is what makes the backend runnable
+/// inside a container. Applies the section 13 threat-model
 /// mitigations directly on the container's HostConfig: no-new-privileges, full capability
 /// drop (+ NET_BIND_SERVICE only when the manifest allows outbound network), strict memory
 /// with no swap, a read-only rootfs (writable /workspace bind + /tmp tmpfs), a read-only
@@ -56,12 +62,13 @@ public class ContainerOrchestrator : IContainerOrchestrator
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly RunStateMachine _stateMachine;
     private readonly ILogger _logger;
-    private readonly string _workspacePath;
+    private readonly ContainerPathMapper _paths;
     private readonly string[] _dns;
     private readonly string? _egressProxy;
     private readonly string _noProxy;
     private readonly string? _allowlistNetwork;
     private readonly int _tmpfsSizeMb;
+    private readonly string[] _securityOpt;
 
     public ContainerOrchestrator(
         DockerClient docker,
@@ -71,7 +78,8 @@ public class ContainerOrchestrator : IContainerOrchestrator
         IServiceScopeFactory scopeFactory,
         RunStateMachine stateMachine,
         ILogger logger,
-        IConfiguration config)
+        IConfiguration config,
+        ContainerPathMapper paths)
     {
         _docker = docker;
         _runRepository = runRepository;
@@ -80,7 +88,7 @@ public class ContainerOrchestrator : IContainerOrchestrator
         _scopeFactory = scopeFactory;
         _stateMachine = stateMachine;
         _logger = logger;
-        _workspacePath = config["Docker:WorkspacePath"] ?? "/var/agenthost/runs";
+        _paths = paths;
 
         // Empty by default: containers inherit the Docker daemon's own resolver configuration.
         // A sovereign/on-prem deployment sets Docker:Dns:0/1/... to its internal resolvers; no
@@ -90,7 +98,28 @@ public class ContainerOrchestrator : IContainerOrchestrator
         _noProxy = config["Docker:NoProxy"] ?? "localhost,127.0.0.1,::1";
         _allowlistNetwork = config["Docker:AllowlistNetwork"];
         _tmpfsSizeMb = int.TryParse(config["Docker:TmpfsSizeMb"], out var mb) && mb > 0 ? mb : 64;
+        _securityOpt = ResolveSecurityOpt(config);
     }
+
+    /// <summary>
+    /// Container security options. Configurable (<c>Docker:SecurityOpt:0/1/...</c>) only because the
+    /// accepted spelling of <c>no-new-privileges</c> has historically varied between engines and
+    /// versions: Docker's daemon accepts the bare key, <c>=true</c> and <c>:true</c>; Podman's compat
+    /// handler splits on <c>=</c> first and also special-cases the bare key. <c>=true</c> is the form
+    /// both parse today and stays the default; an operator hitting an "invalid --security-opt" from an
+    /// older Podman can set the bare <c>no-new-privileges</c> without a code change.
+    /// </summary>
+    private static string[] ResolveSecurityOpt(IConfiguration config)
+    {
+        var configured = config.GetSection("Docker:SecurityOpt").Get<string[]>();
+        return configured is { Length: > 0 } ? configured : new[] { "no-new-privileges=true" };
+    }
+
+    /// <summary>
+    /// Converts the manifest's <c>runtime.cpu</c> (in cores) to the daemon's NanoCPUs unit.
+    /// A non-positive value means "unlimited", which is what leaving the field at 0 expresses.
+    /// </summary>
+    internal static long NanoCpus(long cpuCores) => cpuCores > 0 ? cpuCores * 1_000_000_000L : 0L;
 
     public async Task<string> LaunchAgentAsync(
         Run run,
@@ -127,7 +156,9 @@ public class ContainerOrchestrator : IContainerOrchestrator
                     envVars.Add($"AGENT_{key.ToUpperInvariant()}={value}");
             }
 
-            var workspaceDir = Path.Combine(_workspacePath, run.Id, "workspace");
+            // Local paths: what THIS process reads and writes. The daemon's view of the same two
+            // directories is computed at bind-spec time (ContainerPathMapper) and may differ.
+            var workspaceDir = _paths.LocalWorkspaceDirectory(run.Id);
             var secretsDir = SecretsDirectory(run.Id);
 
             Directory.CreateDirectory(workspaceDir);
@@ -205,14 +236,23 @@ public class ContainerOrchestrator : IContainerOrchestrator
 
                     HostConfig = new HostConfig
                     {
-                        // Resources
-                        CPUCount = run.RuntimeProfile.Cpu,
+                        // Resources.
+                        //
+                        // NanoCPUs, not CPUCount: CPUCount is a Windows-container field that both
+                        // the Linux Docker daemon and Podman ignore outright, so the manifest's
+                        // runtime.cpu used to constrain exactly nothing. NanoCPUs is the portable
+                        // Linux mechanism (cores x 1e9; the daemon turns it into cpu.max /
+                        // CpuQuota+CpuPeriod) and Podman's compat API maps it the same way.
+                        NanoCPUs = NanoCpus(run.RuntimeProfile.Cpu),
                         Memory = run.RuntimeProfile.MemoryBytes,
                         MemorySwap = run.RuntimeProfile.MemoryBytes, // no swap
 
                         // Security (spec section 13.2)
-                        SecurityOpt = new[] { "no-new-privileges=true" },
-                        CapDrop = new[] { "all" },
+                        SecurityOpt = _securityOpt,
+                        // Upper-case "ALL": both engines normalize capability names, but Podman's
+                        // compat path compares the drop-everything sentinel case-sensitively in
+                        // places, and "ALL" is the spelling both accept.
+                        CapDrop = new[] { "ALL" },
                         CapAdd = capAdd,
 
                         // Read-only rootfs by default: the agent writes to the /workspace bind and
@@ -220,11 +260,12 @@ public class ContainerOrchestrator : IContainerOrchestrator
                         // rootfs must opt in explicitly (spec.permissions.writableRootfs: true).
                         ReadonlyRootfs = !containerPolicy.WritableRootfs,
 
-                        // Volumes
+                        // Volumes. Sources are the DAEMON's view of these directories, not this
+                        // process's — see ContainerPathMapper.
                         Binds = new[]
                         {
-                            $"{workspaceDir}:/workspace",
-                            $"{secretsDir}:/run/secrets:ro",
+                            _paths.BindSpec(workspaceDir, "/workspace"),
+                            _paths.BindSpec(secretsDir, "/run/secrets", "ro"),
                         },
                         Tmpfs = new Dictionary<string, string>
                         {
@@ -335,7 +376,7 @@ public class ContainerOrchestrator : IContainerOrchestrator
     private sealed record NetworkPolicy(
         string Mode, bool HasNetwork, IReadOnlyList<string> EnvVars, IReadOnlyList<string> Allowlist);
 
-    private string SecretsDirectory(string runId) => Path.Combine(_workspacePath, runId, "secrets");
+    private string SecretsDirectory(string runId) => _paths.LocalSecretsDirectory(runId);
 
     private static void SetUnixMode(string path, UnixFileMode mode)
     {

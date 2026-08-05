@@ -4,6 +4,7 @@ using System.Threading.RateLimiting;
 using AgentHost.Api.Endpoints;
 using AgentHost.Api.Hubs;
 using AgentHost.Api.Infrastructure;
+using AgentHost.Api.Infrastructure.Storage;
 using AgentHost.Api.Repositories;
 using AgentHost.Api.Services;
 using Docker.DotNet;
@@ -59,11 +60,33 @@ builder.Services.AddSingleton<IDbConnectionFactory, NpgsqlConnectionFactory>();
 builder.Services.AddSingleton(sp => new MigrationRunner(
     builder.Configuration, sp.GetRequiredService<IHostEnvironment>(), sp.GetRequiredService<Serilog.ILogger>()));
 
+// Container runtime endpoint. Docker and Podman both speak the Docker API, so one client drives
+// either; only the socket location differs, and it is discovered rather than declared. See
+// Infrastructure/ContainerRuntimeEndpoint.cs.
+var containerRuntime = ContainerRuntimeEndpoint.Resolve(builder.Configuration);
+Log.Information(
+    "Container runtime endpoint {Endpoint} ({Runtime}, {Source})",
+    containerRuntime.Uri, containerRuntime.Runtime, containerRuntime.Source);
+builder.Services.AddSingleton(containerRuntime);
 builder.Services.AddSingleton<DockerClient>(_ =>
+    new DockerClientConfiguration(new Uri(containerRuntime.Uri)).CreateClient());
+
+// Maps the backend's own view of the run workspace onto the view the container daemon has, so
+// bind mounts work when the backend is itself containerized (Docker-in-Docker, rootless Podman).
+var containerPathMapper = ContainerPathMapper.FromConfiguration(builder.Configuration);
+if (containerPathMapper.RemapsPaths)
 {
-    var dockerHost = builder.Configuration["Docker:Host"] ?? "unix:///var/run/docker.sock";
-    return new DockerClientConfiguration(new Uri(dockerHost)).CreateClient();
-});
+    Log.Information(
+        "Run workspace {LocalRoot} is bind-mounted from {DaemonRoot} as the container daemon sees it",
+        containerPathMapper.LocalWorkspaceRoot, containerPathMapper.DaemonWorkspaceRoot);
+}
+builder.Services.AddSingleton(containerPathMapper);
+
+// ---- Artifact storage: local disk (default) or any S3-compatible object store ----
+// Resolved eagerly so a broken S3 configuration fails at startup with the full list of problems,
+// rather than on the first upload with one symptom.
+var artifactStorage = CreateArtifactStorage(builder.Configuration, Log.Logger);
+builder.Services.AddSingleton<IArtifactStorage>(artifactStorage);
 
 // Redis is optional (spec 4.1: "optional, cache/sessions") — wrapped in a holder so a
 // missing/unreachable Redis never blocks startup; consumers check RedisConnectionHolder.Multiplexer
@@ -409,6 +432,41 @@ app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }
 app.MapPrometheusScrapingEndpoint("/metrics").AllowAnonymous().DisableRateLimiting();
 
 app.Run();
+
+/// <summary>
+/// Builds the artifact storage backend from <c>Artifacts:Provider</c> (<c>local</c> by default,
+/// <c>s3</c> for AWS S3 / MinIO / Ceph). An unknown provider name is fatal rather than silently
+/// falling back to local disk, which would write artifacts to a node's ephemeral filesystem while the
+/// operator believes they are in a bucket.
+/// </summary>
+static IArtifactStorage CreateArtifactStorage(IConfiguration config, Serilog.ILogger logger)
+{
+    var provider = (config["Artifacts:Provider"] ?? "local").Trim().ToLowerInvariant();
+
+    switch (provider)
+    {
+        case "" or "local":
+            var local = new LocalArtifactStorage(config);
+            logger.Information("Artifact storage: local disk at {Root}", local.Root);
+            return local;
+
+        case "s3":
+            var options = S3ArtifactStorageOptions.FromConfiguration(config);
+            var errors = options.Validate();
+            if (errors.Count > 0)
+                throw new InvalidOperationException("Artifacts:Provider is 's3' but the configuration is incomplete: " + string.Join(" ", errors));
+
+            logger.Information(
+                "Artifact storage: S3 bucket {Bucket} (endpoint {Endpoint}, prefix {Prefix}, {Credentials} credentials)",
+                options.Bucket, options.ServiceUrl ?? $"AWS {options.EffectiveRegion}", options.KeyPrefix,
+                options.HasStaticCredentials ? "static" : "ambient");
+            return new S3ArtifactStorage(options);
+
+        default:
+            throw new InvalidOperationException(
+                $"Unknown Artifacts:Provider '{provider}'. Supported values: 'local', 's3'.");
+    }
+}
 
 /// <summary>
 /// Connects to Redis when configured, returning null when it is not configured or not reachable —

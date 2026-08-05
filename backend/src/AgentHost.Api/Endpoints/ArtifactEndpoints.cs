@@ -1,23 +1,24 @@
 using System.Text;
 using AgentHost.Api.Domain;
 using AgentHost.Api.Infrastructure;
+using AgentHost.Api.Infrastructure.Storage;
 using AgentHost.Api.Repositories;
 
 namespace AgentHost.Api.Endpoints;
 
 /// <summary>
-/// Run artifact upload/download. Files are written to local disk under
-/// <c>Artifacts:StoragePath</c> (default "/var/agenthost/artifacts"); the <c>artifacts.s3_path</c>
-/// column currently stores that local absolute path, not a real s3:// URI — an S3/blob storage
-/// backend is future work, this is a local-disk stand-in for it.
+/// Run artifact upload/download. Bytes go through <see cref="IArtifactStorage"/>, so the same routes
+/// serve local disk (<c>Artifacts:Provider=local</c>, the default) and any S3-compatible object store
+/// (<c>s3</c>: AWS S3, MinIO, Ceph). The <c>artifacts.s3_path</c> column stores whatever key that
+/// provider derived — an absolute path for local disk, an object key for S3 — with no schema change.
 ///
 /// Every route resolves the artifact (or its run) with the caller's org from the JWT, so one
-/// tenant cannot read, list or write into another tenant's run directory.
+/// tenant cannot read, list or write into another tenant's run directory. Downloads are streamed
+/// through the API rather than redirected to a presigned URL; the reasoning is in
+/// <see cref="S3ArtifactStorage"/>.
 /// </summary>
 public static class ArtifactEndpoints
 {
-    private const string DefaultStoragePath = "/var/agenthost/artifacts";
-
     /// <summary>Upper bound on the stored filename, leaving room for the "{ulid}-" prefix.</summary>
     private const int MaxArtifactNameLength = 150;
 
@@ -43,7 +44,7 @@ public static class ArtifactEndpoints
         HttpRequest request,
         IRunRepository runRepository,
         IArtifactRepository artifactRepository,
-        IConfiguration configuration,
+        IArtifactStorage storage,
         ICallerContext caller,
         CancellationToken ct)
     {
@@ -59,9 +60,6 @@ public static class ArtifactEndpoints
         var run = await runRepository.GetAsync(runId, caller.OrgId, ct);
         if (run is null) return Results.NotFound();
 
-        var storagePath = configuration["Artifacts:StoragePath"];
-        if (string.IsNullOrWhiteSpace(storagePath)) storagePath = DefaultStoragePath;
-
         var requestedName = string.IsNullOrWhiteSpace(name) ? file.FileName : name;
         var artifactName = SanitizeArtifactName(requestedName);
         if (artifactName is null)
@@ -69,26 +67,15 @@ public static class ArtifactEndpoints
 
         var artifactId = UlidGenerator.NewUlid();
 
-        // runId comes from the route, so it is sanitized too — a run id is always a ULID, but the
-        // path is built from it regardless of whether the lookup above happened to be strict.
-        var runDir = Path.GetFullPath(Path.Combine(storagePath, SanitizeArtifactName(runId) ?? artifactId));
-        var storageRoot = Path.GetFullPath(storagePath);
-        if (!IsUnder(storageRoot, runDir)) return Results.BadRequest(new { error = "Invalid run id" });
+        // runId comes from the route, so it is sanitized too — a run id is always a ULID, but the key
+        // is built from it regardless of whether the lookup above happened to be strict. The provider
+        // then re-checks that the key stays inside its own namespace and returns null if it does not.
+        var safeRunId = SanitizeArtifactName(runId) ?? artifactId;
+        var key = storage.DeriveKey(safeRunId, artifactId, artifactName);
+        if (key is null) return Results.BadRequest(new { error = "Invalid artifact name or run id" });
 
-        Directory.CreateDirectory(runDir);
-
-        var filePath = Path.GetFullPath(Path.Combine(runDir, $"{artifactId}-{artifactName}"));
-
-        // Belt and braces: even after sanitizing, confirm the resolved path really is inside the
-        // run's own directory before opening it for writing. Previously nothing stopped a name
-        // like "../../etc/cron.d/x" from escaping; it only failed because the "{ulid}-" prefix
-        // happened to make the first path segment nonexistent — an accident, not a defense.
-        if (!IsUnder(runDir, filePath)) return Results.BadRequest(new { error = "Invalid artifact name" });
-
-        await using (var fileStream = File.Create(filePath))
-        {
-            await file.CopyToAsync(fileStream, ct);
-        }
+        await using var upload = file.OpenReadStream();
+        var sizeBytes = await storage.SaveAsync(key, upload, file.ContentType, ct);
 
         var artifact = new Artifact
         {
@@ -96,8 +83,8 @@ public static class ArtifactEndpoints
             RunId = runId,
             Name = artifactName,
             ArtifactType = artifactType,
-            S3Path = filePath,
-            SizeBytes = new FileInfo(filePath).Length,
+            S3Path = key,
+            SizeBytes = sizeBytes,
             CreatedAt = DateTime.UtcNow,
         };
 
@@ -118,12 +105,17 @@ public static class ArtifactEndpoints
         return artifact != null ? Results.Ok(artifact) : Results.NotFound();
     }
 
-    private static async Task<IResult> DownloadArtifact(string id, IArtifactRepository repository, ICallerContext caller, CancellationToken ct)
+    private static async Task<IResult> DownloadArtifact(
+        string id, IArtifactRepository repository, IArtifactStorage storage, ICallerContext caller, CancellationToken ct)
     {
         var artifact = await repository.GetAsync(id, caller.OrgId, ct);
-        if (artifact is null || !File.Exists(artifact.S3Path)) return Results.NotFound();
+        if (artifact is null || string.IsNullOrWhiteSpace(artifact.S3Path)) return Results.NotFound();
 
-        var stream = File.OpenRead(artifact.S3Path);
+        // Streamed, never buffered: Results.File copies the provider's stream to the response body
+        // and disposes it afterwards, so a multi-gigabyte artifact costs one copy buffer.
+        var stream = await storage.OpenReadAsync(artifact.S3Path, ct);
+        if (stream is null) return Results.NotFound();
+
         return Results.File(stream, "application/octet-stream", fileDownloadName: artifact.Name);
     }
 
@@ -155,12 +147,5 @@ public static class ArtifactEndpoints
         if (sanitized.Length > MaxArtifactNameLength) sanitized = sanitized[..MaxArtifactNameLength];
 
         return sanitized;
-    }
-
-    /// <summary>True when <paramref name="candidate"/> resolves to a path inside <paramref name="root"/>.</summary>
-    private static bool IsUnder(string root, string candidate)
-    {
-        var normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        return candidate.StartsWith(normalizedRoot, StringComparison.Ordinal);
     }
 }

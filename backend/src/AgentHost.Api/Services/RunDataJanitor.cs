@@ -1,3 +1,5 @@
+using AgentHost.Api.Infrastructure;
+using AgentHost.Api.Infrastructure.Storage;
 using Serilog;
 
 namespace AgentHost.Api.Services;
@@ -16,27 +18,33 @@ namespace AgentHost.Api.Services;
 ///   period just has to exceed the time between writing the secrets and starting the container.</item>
 ///   <item><b>Run workspaces</b> — whole <c>{runId}</c> directories untouched for longer than
 ///   <c>Retention:WorkspaceHours</c> (default 168 = 7 days). Set to 0 to keep them forever.</item>
-///   <item><b>Artifacts</b> — files under <c>Artifacts:StoragePath</c> older than
-///   <c>Retention:ArtifactDays</c>. DISABLED by default (0), because artifact rows in the database
-///   reference these files: enable it only with a matching database retention policy, or the API
-///   will list artifacts whose bytes are gone.</item>
+///   <item><b>Artifacts</b> — objects older than <c>Retention:ArtifactDays</c>, enumerated through
+///   <see cref="IArtifactStorage"/> so the sweep applies to local disk and to an S3 bucket alike.
+///   DISABLED by default (0), because artifact rows in the database reference these objects: enable
+///   it only with a matching database retention policy, or the API will list artifacts whose bytes
+///   are gone. (On S3 a bucket lifecycle rule does the same job server-side and costs no API calls;
+///   this sweep exists so the behaviour does not silently depend on which backend is configured.)</item>
 /// </list>
+///
+/// Note that the workspace sweep is deliberately driven by the backend's OWN view of the run
+/// directory (<c>Docker:WorkspacePath</c>), not the daemon's (<c>Docker:HostWorkspacePath</c>): this
+/// process is the one doing the deleting.
 /// </summary>
 public class RunDataJanitor : BackgroundService
 {
     private readonly ILogger _logger;
+    private readonly IArtifactStorage _artifactStorage;
     private readonly string _workspaceRoot;
-    private readonly string? _artifactsRoot;
     private readonly TimeSpan _interval;
     private readonly TimeSpan _secretsGrace;
     private readonly TimeSpan _workspaceRetention;
     private readonly TimeSpan _artifactRetention;
 
-    public RunDataJanitor(IConfiguration config, ILogger logger)
+    public RunDataJanitor(IConfiguration config, ILogger logger, IArtifactStorage artifactStorage, ContainerPathMapper paths)
     {
         _logger = logger;
-        _workspaceRoot = config["Docker:WorkspacePath"] ?? "/var/agenthost/runs";
-        _artifactsRoot = config["Artifacts:StoragePath"];
+        _artifactStorage = artifactStorage;
+        _workspaceRoot = paths.LocalWorkspaceRoot;
 
         _interval = TimeSpan.FromMinutes(ReadPositiveDouble(config, "Retention:SweepIntervalMinutes", 60));
         _secretsGrace = TimeSpan.FromMinutes(ReadPositiveDouble(config, "Retention:SecretsGraceMinutes", 60));
@@ -60,7 +68,7 @@ public class RunDataJanitor : BackgroundService
         {
             try
             {
-                Sweep();
+                await SweepAsync(stoppingToken);
             }
             catch (Exception ex)
             {
@@ -78,10 +86,10 @@ public class RunDataJanitor : BackgroundService
         }
     }
 
-    internal void Sweep()
+    internal async Task SweepAsync(CancellationToken ct)
     {
         SweepRunDirectories();
-        SweepArtifacts();
+        await SweepArtifactsAsync(ct);
     }
 
     private void SweepRunDirectories()
@@ -119,27 +127,27 @@ public class RunDataJanitor : BackgroundService
         }
     }
 
-    private void SweepArtifacts()
+    private async Task SweepArtifactsAsync(CancellationToken ct)
     {
-        if (_artifactRetention <= TimeSpan.Zero || string.IsNullOrWhiteSpace(_artifactsRoot) || !Directory.Exists(_artifactsRoot))
+        if (_artifactRetention <= TimeSpan.Zero)
             return;
 
         var cutoff = DateTime.UtcNow - _artifactRetention;
 
-        foreach (var file in Directory.EnumerateFiles(_artifactsRoot, "*", SearchOption.AllDirectories))
+        await foreach (var stored in _artifactStorage.ListAsync(ct))
         {
+            if (stored.LastModifiedUtc >= cutoff)
+                continue;
+
             try
             {
-                if (File.GetLastWriteTimeUtc(file) < cutoff)
-                {
-                    File.Delete(file);
-                    _logger.Information("Deleted expired artifact file {File} (retention {Retention})",
-                        file, _artifactRetention);
-                }
+                await _artifactStorage.DeleteAsync(stored.Key, ct);
+                _logger.Information("Deleted expired artifact {Key} from {Provider} storage (retention {Retention})",
+                    stored.Key, _artifactStorage.ProviderName, _artifactRetention);
             }
             catch (Exception ex)
             {
-                _logger.Warning(ex, "Could not apply retention to artifact file {File}", file);
+                _logger.Warning(ex, "Could not apply retention to artifact {Key}", stored.Key);
             }
         }
     }
