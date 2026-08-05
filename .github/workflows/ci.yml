@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (build + test)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agenthost
+          POSTGRES_PASSWORD: agenthost_dev
+          POSTGRES_DB: agenthost
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agenthost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ConnectionStrings__DefaultConnection: "Host=localhost;Port=5432;Database=agenthost;Username=agenthost;Password=agenthost_dev"
+      Secrets__EncryptionKey: "5ijlcr2IxwxqH7PEwsUIGQSvbZ/w6EMuOk3mXorL54c="
+      Jwt__Secret: "hkA6jtNJGUsnP4++43POCQPqDtH2ABIaIUKj9gXxeJmXnpv5kYxiR9tRYT+JUzke"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        working-directory: backend
+        run: dotnet restore
+
+      - name: Build
+        working-directory: backend
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        working-directory: backend
+        run: dotnet test --no-build --configuration Release --logger "console;verbosity=normal"
+
+  frontend:
+    name: Frontend (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build (production)
+        working-directory: frontend
+        run: npm run build
+
+      - name: Test
+        working-directory: frontend
+        run: npm test -- --watch=false

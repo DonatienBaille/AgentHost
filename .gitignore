@@ -23,3 +23,6 @@ logs/
 # Env
 .env
 .env.local
+
+# Claude Code agent worktrees
+.claude/
