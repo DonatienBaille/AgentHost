@@ -48,4 +48,14 @@ public class Run
     /// the lifetime of a single ExecuteRunAsync flow.
     /// </summary>
     public RuntimeProfile RuntimeProfile { get; set; } = RuntimeProfile.Default();
+
+    /// <summary>
+    /// Short-lived, run-scoped callback credential minted just before launch and injected into the
+    /// agent container as <c>AGENTHOST_RUN_TOKEN</c> (see docs/agent-protocol.md). Like
+    /// <see cref="RuntimeProfile"/> it is *not* persisted — it exists only on the in-memory instance
+    /// during a single launch flow, and is deliberately excluded from API responses so a run's
+    /// credential never leaks to a human client.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? AgentRunToken { get; set; }
 }

@@ -153,6 +153,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorizationPolicies();
 
+// ---- Agent callback protocol (docs/agent-protocol.md) ----
+// Adds the run-scoped "AgentRun" bearer scheme (distinct audience), its authorization policy and
+// IRunTokenService; see Infrastructure/RunTokenService.cs.
+builder.Services.AddAgentRunAuthentication(builder.Configuration);
+
+// ---- Run watchdog: enforces maxDurationSeconds and approvals.expires_at ----
+builder.Services.AddSingleton<RunWatchdog>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RunWatchdog>());
+
 // ---- SignalR ----
 // AddJsonProtocol uses its own JsonSerializerOptions, separate from ConfigureHttpJsonOptions
 // below — without this, hub payloads (Run/RunEvent broadcasts) would serialize enums as
@@ -207,7 +216,12 @@ builder.Services.AddRateLimiter(options =>
 {
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
-            ctx.User.Identity?.Name ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            // Partition on the token's subject, not Identity.Name: our JWTs carry no `name` claim
+            // (MapInboundClaims is off), so Identity.Name is always null and every authenticated
+            // caller in the system silently shared a single IP-keyed bucket. GetUserId() reads the
+            // `sub` claim — a user id for a user token, a run id for an agent run token — which is
+            // the "per authenticated user" partition this limiter was documented to apply.
+            ctx.User.GetUserId() ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.OnRejected = (ctx, ct) =>
     {
@@ -245,6 +259,7 @@ app.MapHub<AgentMemoryHub>("/hubs/memory").RequireAuthorization();
 
 app.MapAuthEndpoints();
 app.MapRunEndpoints();
+app.MapAgentProtocolEndpoints();
 app.MapAgentEndpoints();
 app.MapAgentVersionEndpoints();
 app.MapArtifactEndpoints();

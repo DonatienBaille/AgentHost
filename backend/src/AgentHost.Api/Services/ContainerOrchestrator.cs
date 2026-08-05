@@ -69,6 +69,9 @@ public class ContainerOrchestrator : IContainerOrchestrator
                 $"AGENTHOST_PROJECT_ID={run.ProjectId}",
                 $"AGENTHOST_INPUTS={JsonSerializer.Serialize(run.Inputs)}",
                 "AGENTHOST_PROTOCOL_VERSION=1.0",
+                // Run-scoped callback credential for the agent protocol (docs/agent-protocol.md);
+                // minted in RunService just before launch, never persisted.
+                $"AGENTHOST_RUN_TOKEN={run.AgentRunToken}",
             };
 
             foreach (var (key, value) in secrets)

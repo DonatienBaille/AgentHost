@@ -35,6 +35,7 @@ public class RunService : IRunService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAuditService _auditService;
     private readonly IWebhookDispatcher _webhookDispatcher;
+    private readonly ICallerContext _callerContext;
     private readonly ILogger _logger;
 
     public RunService(
@@ -50,6 +51,7 @@ public class RunService : IRunService
         IServiceScopeFactory scopeFactory,
         IAuditService auditService,
         IWebhookDispatcher webhookDispatcher,
+        ICallerContext callerContext,
         ILogger logger)
     {
         _runRepository = runRepository;
@@ -64,8 +66,15 @@ public class RunService : IRunService
         _scopeFactory = scopeFactory;
         _auditService = auditService;
         _webhookDispatcher = webhookDispatcher;
+        _callerContext = callerContext;
         _logger = logger;
     }
+
+    /// <summary>
+    /// The human on whose behalf this call is running, taken from the signed token — never from the
+    /// request body. Null when there is no authenticated caller (e.g. an internal/background path).
+    /// </summary>
+    private string? CallerUserId => _callerContext.IsAuthenticated ? _callerContext.UserId : null;
 
     public async Task<Run> CreateAsync(CreateRunRequest req, CancellationToken ct = default)
     {
@@ -85,9 +94,12 @@ public class RunService : IRunService
             ?? throw new KeyNotFoundException($"Project {projectId} not found");
 
         var manifest = _manifestParser.Parse(agent.ManifestYaml);
-        var number = await _runRepository.GetNextRunNumberAsync(projectId, ct);
 
         var now = DateTime.UtcNow;
+        var budgetMaxUsd = ResolveRunBudget(req.BudgetMaxUsd, manifest);
+        await EnsureProjectMonthlyBudgetAvailableAsync(project, now, ct);
+
+        var number = await _runRepository.GetNextRunNumberAsync(projectId, ct);
         var run = new Run
         {
             Id = UlidGenerator.NewUlid(),
@@ -99,9 +111,9 @@ public class RunService : IRunService
             Status = RunStatus.Pending,
             Inputs = req.Inputs ?? new JsonObject(),
             Context = req.Context ?? new JsonObject(),
-            BudgetMaxUsd = req.BudgetMaxUsd ?? manifest.Spec.Budget.DefaultMaxUsd,
+            BudgetMaxUsd = budgetMaxUsd,
             BudgetUsedUsd = 0m,
-            TriggeredByUserId = req.TriggeredByUserId,
+            TriggeredByUserId = CallerUserId,
             TriggeredByType = req.TriggeredByType,
             ParentRunId = req.ParentRunId,
             RootRunId = req.ParentRunId, // simplification: root = immediate parent unless chained further
@@ -128,7 +140,7 @@ public class RunService : IRunService
         }, ct);
 
         await _auditService.RecordAsync(
-            project.OrgId, "run.created", req.TriggeredByUserId, "run", run.Id, ct: ct);
+            project.OrgId, "run.created", run.TriggeredByUserId, "run", run.Id, ct: ct);
 
         await _webhookDispatcher.DispatchAsync(run.ProjectId, "run.created", new
         {
@@ -147,6 +159,44 @@ public class RunService : IRunService
         return run;
     }
 
+    /// <summary>
+    /// Resolves the run's budget cap. A caller-supplied <c>budgetMaxUsd</c> was previously accepted
+    /// unbounded, letting a client grant itself an arbitrary spend; the manifest's
+    /// <c>budget.hardMaxUsd</c> is the agent author's ceiling and is now enforced.
+    /// </summary>
+    private static decimal ResolveRunBudget(decimal? requested, AgentManifest manifest)
+    {
+        var hardMax = manifest.Spec.Budget.HardMaxUsd;
+
+        if (requested is null)
+            return Math.Min(manifest.Spec.Budget.DefaultMaxUsd, hardMax > 0 ? hardMax : manifest.Spec.Budget.DefaultMaxUsd);
+
+        if (requested < 0)
+            throw new ArgumentException("budgetMaxUsd cannot be negative");
+
+        if (hardMax > 0 && requested > hardMax)
+            throw new InvalidOperationException(
+                $"budgetMaxUsd {requested:0.##} exceeds the agent manifest's budget.hardMaxUsd of {hardMax:0.##}");
+
+        return requested.Value;
+    }
+
+    /// <summary>
+    /// Refuses to start a run once the project has consumed its <c>budget_monthly_usd</c> for the
+    /// current calendar month (sum of every run's <c>budget_used_usd</c> created this month).
+    /// </summary>
+    private async Task EnsureProjectMonthlyBudgetAvailableAsync(Project project, DateTime nowUtc, CancellationToken ct)
+    {
+        if (project.BudgetMonthlyUsd <= 0) return;
+
+        var monthStart = new DateTime(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var used = await _runRepository.SumBudgetUsedForProjectSinceAsync(project.Id, monthStart, ct);
+
+        if (used >= project.BudgetMonthlyUsd)
+            throw new InvalidOperationException(
+                $"Project monthly budget exhausted: {used:0.##} of {project.BudgetMonthlyUsd:0.##} USD already spent this month");
+    }
+
     private async Task ExecuteRunInNewScopeAsync(string runId)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -156,6 +206,8 @@ public class RunService : IRunService
         var orchestrator = scope.ServiceProvider.GetRequiredService<IContainerOrchestrator>();
         var secretsBroker = scope.ServiceProvider.GetRequiredService<ISecretsBroker>();
         var stateMachine = scope.ServiceProvider.GetRequiredService<RunStateMachine>();
+        var runTokenService = scope.ServiceProvider.GetRequiredService<IRunTokenService>();
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger>();
 
         var run = await runRepository.GetAsync(runId, CancellationToken.None);
@@ -178,10 +230,30 @@ public class RunService : IRunService
 
         try
         {
+            var manifest = manifestParser.Parse(agent.ManifestYaml);
+
+            run.RuntimeProfile = new RuntimeProfile
+            {
+                Profile = manifest.Spec.Runtime.Profile,
+                Cpu = manifest.Spec.Runtime.Cpu,
+                Memory = manifest.Spec.Runtime.Memory,
+                Disk = manifest.Spec.Runtime.Disk,
+                MaxDurationSeconds = manifest.Spec.Runtime.MaxDurationSeconds,
+            };
+
+            // The orchestrator creates {WorkspacePath}/{runId}/{workspace,secrets} but never told
+            // anyone about it; record the run's directory so `runs.workspace_path` is actually
+            // populated. Set before the first transition so that transition's UPDATE persists it.
+            var workspaceRoot = configuration["Docker:WorkspacePath"] ?? "/var/agenthost/runs";
+            run.WorkspacePath = Path.Combine(workspaceRoot, run.Id);
+
+            // Run-scoped callback credential for the agent protocol (docs/agent-protocol.md).
+            // Minted per launch, never persisted, and injected as AGENTHOST_RUN_TOKEN.
+            run.AgentRunToken = runTokenService.Issue(run);
+
             await stateMachine.TransitionAsync(run, RunStatus.Provisioning, ct: CancellationToken.None);
             await stateMachine.TransitionAsync(run, RunStatus.Preparing, ct: CancellationToken.None);
 
-            var manifest = manifestParser.Parse(agent.ManifestYaml);
             var secrets = await secretsBroker.ResolveForRunAsync(
                 run.OrgId, run.ProjectId, run.Id, manifest.Spec.Permissions.Secrets, CancellationToken.None);
 
@@ -220,13 +292,17 @@ public class RunService : IRunService
 
         var approval = await _approvalRepository.GetPendingForRunAsync(runId, ct);
 
+        if (!CallerMaySatisfy(approval))
+            return false;
+
         var decision = (req.Decision ?? "approve").ToLowerInvariant();
+        var decidedBy = CallerUserId;
 
         if (approval is not null)
         {
             approval.Responses.Add(new ApprovalResponse
             {
-                By = req.DecidedByUserId ?? "unknown",
+                By = decidedBy ?? "unknown",
                 Decision = decision,
                 At = DateTime.UtcNow,
                 Note = req.Note,
@@ -236,13 +312,13 @@ public class RunService : IRunService
             {
                 approval.Status = ApprovalStatus.Rejected;
                 approval.DecidedAt = DateTime.UtcNow;
-                approval.DecidedBy = req.DecidedByUserId;
+                approval.DecidedBy = decidedBy;
             }
             else if (approval.Responses.Count >= approval.RequiredCount)
             {
                 approval.Status = ApprovalStatus.Approved;
                 approval.DecidedAt = DateTime.UtcNow;
-                approval.DecidedBy = req.DecidedByUserId;
+                approval.DecidedBy = decidedBy;
             }
 
             await _approvalRepository.UpdateAsync(approval, ct);
@@ -278,6 +354,45 @@ public class RunService : IRunService
         return true;
     }
 
+    /// <summary>
+    /// Enforces the approval's <c>required_role</c>: a decision from a caller below that role (or
+    /// from a caller we cannot identify at all) is refused. Without this, an approval gate the
+    /// agent asked a maintainer for could be satisfied by any developer.
+    /// </summary>
+    private bool CallerMaySatisfy(Approval? approval)
+    {
+        if (approval is null || string.IsNullOrWhiteSpace(approval.RequiredRole))
+            return true;
+
+        UserRole required;
+        try
+        {
+            required = UserRoleExtensions.FromDbString(approval.RequiredRole);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            _logger.Warning("Approval {ApprovalId} has unrecognized required_role {Role}; refusing the decision",
+                approval.Id, approval.RequiredRole);
+            return false;
+        }
+
+        if (!_callerContext.IsAuthenticated)
+        {
+            _logger.Warning("Approval {ApprovalId} requires role {Role} but the caller could not be identified",
+                approval.Id, approval.RequiredRole);
+            return false;
+        }
+
+        if (!_callerContext.HasAtLeast(required))
+        {
+            _logger.Warning("User {UserId} ({Role}) may not decide approval {ApprovalId} which requires {Required}",
+                _callerContext.UserId, _callerContext.Role, approval.Id, required);
+            return false;
+        }
+
+        return true;
+    }
+
     public async Task<bool> CancelAsync(string runId, CancellationToken ct = default)
     {
         var run = await _runRepository.GetAsync(runId, ct);
@@ -287,7 +402,7 @@ public class RunService : IRunService
         await _orchestrator.StopAsync(runId, ct);
         await _stateMachine.TransitionAsync(run, RunStatus.Cancelled, "cancelled by user", ct);
 
-        await _auditService.RecordAsync(run.OrgId, "run.cancelled", run.TriggeredByUserId, "run", run.Id, ct: ct);
+        await _auditService.RecordAsync(run.OrgId, "run.cancelled", CallerUserId ?? run.TriggeredByUserId, "run", run.Id, ct: ct);
 
         return true;
     }
@@ -299,17 +414,22 @@ public class RunService : IRunService
             return false;
 
         var approval = await _approvalRepository.GetPendingForRunAsync(runId, ct);
+
+        if (!CallerMaySatisfy(approval))
+            return false;
+
         if (approval is not null)
         {
             approval.Responses.Add(new ApprovalResponse
             {
-                By = "user",
+                By = CallerUserId ?? "user",
                 Decision = "answer",
                 Answer = answer,
                 At = DateTime.UtcNow,
             });
             approval.Status = ApprovalStatus.Approved;
             approval.DecidedAt = DateTime.UtcNow;
+            approval.DecidedBy = CallerUserId;
             await _approvalRepository.UpdateAsync(approval, ct);
         }
 
