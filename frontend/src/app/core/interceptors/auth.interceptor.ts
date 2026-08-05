@@ -1,10 +1,9 @@
 import { HttpInterceptorFn } from '@angular/common/http';
-
-const TOKEN_KEY = 'agenthost_token';
+import { readAccessToken } from '../utils/auth-storage';
 
 /** Attaches a Bearer token from localStorage to outgoing API requests, if present. */
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
-  const token = localStorage.getItem(TOKEN_KEY);
+  const token = readAccessToken();
   if (!token) {
     return next(req);
   }

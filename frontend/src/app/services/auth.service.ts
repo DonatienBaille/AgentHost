@@ -1,16 +1,25 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { Observable, catchError, finalize, firstValueFrom, map, of, shareReplay, tap, throwError } from 'rxjs';
 import { environment } from '../../environments/environment';
-import { AuthResponse, LoginRequest, RegisterRequest, User, UserRole } from '../core/models';
+import { AuthResponse, LoginRequest, RefreshRequest, RegisterRequest, User, UserRole } from '../core/models';
 import { hasRoleAtLeast } from '../core/utils/roles';
+import {
+  clearSessionStorage,
+  readAccessToken,
+  readRefreshToken,
+  readUser,
+  writeSession,
+} from '../core/utils/auth-storage';
 
 const BASE_URL = `${environment.apiUrl}/api/auth`;
 
-// Matches core/interceptors/auth.interceptor.ts — keep this key in sync.
-const TOKEN_KEY = 'agenthost_token';
-const USER_KEY = 'agenthost_user';
+/** Auth routes that must never trigger the refresh-and-replay flow — see AUTH_EXEMPT_PATHS use. */
+export const LOGIN_PATH = `${BASE_URL}/login`;
+export const REGISTER_PATH = `${BASE_URL}/register`;
+export const REFRESH_PATH = `${BASE_URL}/refresh`;
+export const LOGOUT_PATH = `${BASE_URL}/logout`;
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -28,13 +37,23 @@ export class AuthService {
     hasRoleAtLeast(this.currentUser()?.role, 'developer'),
   );
 
+  /**
+   * The single in-flight refresh, shared by every 401'd request that is waiting on it.
+   *
+   * This is not just an optimisation: POST /api/auth/refresh *rotates* the pair and revokes the
+   * token it was given, and replaying an already-revoked token makes the server revoke the whole
+   * token family. Two concurrent refreshes would therefore log the user out rather than renew
+   * their session.
+   */
+  private refreshInFlight: Observable<string> | null = null;
+
   hasRole(min: UserRole): boolean {
     return hasRoleAtLeast(this.currentUser()?.role, min);
   }
 
   async login(email: string, password: string): Promise<User> {
     const body: LoginRequest = { email, password };
-    const res = await firstValueFrom(this.http.post<AuthResponse>(`${BASE_URL}/login`, body));
+    const res = await firstValueFrom(this.http.post<AuthResponse>(LOGIN_PATH, body));
     this.persist(res);
     return res.user;
   }
@@ -47,37 +66,90 @@ export class AuthService {
     displayName?: string,
   ): Promise<User> {
     const body: RegisterRequest = { orgName, orgSlug, email, password, displayName };
-    const res = await firstValueFrom(this.http.post<AuthResponse>(`${BASE_URL}/register`, body));
+    const res = await firstValueFrom(this.http.post<AuthResponse>(REGISTER_PATH, body));
     this.persist(res);
     return res.user;
   }
 
-  logout(): void {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+  /** Current access token, for consumers that can't go through the HTTP interceptor (SignalR). */
+  accessToken(): string | null {
+    return readAccessToken();
+  }
+
+  /**
+   * Renews the access token from the stored refresh token, sharing one HTTP call across all
+   * concurrent callers. Emits the new access token; errors if there is nothing to refresh with or
+   * the server refuses (in which case the local session has already been cleared).
+   */
+  refreshAccessToken(): Observable<string> {
+    if (this.refreshInFlight) {
+      return this.refreshInFlight;
+    }
+
+    const refreshToken = readRefreshToken();
+    if (!refreshToken) {
+      this.clearSession();
+      return throwError(() => new Error('No refresh token available'));
+    }
+
+    const body: RefreshRequest = { refreshToken };
+    this.refreshInFlight = this.http.post<AuthResponse>(REFRESH_PATH, body).pipe(
+      tap((res) => this.persist(res)),
+      map((res) => res.token),
+      catchError((err) => {
+        // Unknown/expired/already-rotated token: the session is unrecoverable.
+        this.clearSession();
+        return throwError(() => err);
+      }),
+      // Clearing the slot on completion means the *next* 401 starts a fresh refresh, while
+      // everyone who joined this one still gets its replayed result.
+      finalize(() => {
+        this.refreshInFlight = null;
+      }),
+      shareReplay({ bufferSize: 1, refCount: false }),
+    );
+
+    return this.refreshInFlight;
+  }
+
+  /**
+   * Best-effort server-side revocation of every refresh token this user holds, then local
+   * teardown. The local session is cleared even when the call fails — a user who clicked
+   * "log out" must end up logged out of this browser regardless of the network.
+   */
+  async logout(): Promise<void> {
+    if (readAccessToken()) {
+      await firstValueFrom(
+        this.http.post<{ revoked: number }>(LOGOUT_PATH, {}).pipe(catchError(() => of(null))),
+      );
+    }
+    this.clearSession();
+    await this.router.navigate(['/login']);
+  }
+
+  /** Drops the local session without touching the server or navigating. */
+  clearSession(): void {
+    clearSessionStorage();
     this.currentUser.set(null);
-    this.router.navigate(['/login']);
+    this.refreshInFlight = null;
   }
 
   /** Restores the session from localStorage on app bootstrap (e.g. after a page refresh). */
   loadFromStorage(): void {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const rawUser = localStorage.getItem(USER_KEY);
-    if (!token || !rawUser) {
+    const token = readAccessToken();
+    if (!token) {
       return;
     }
-    try {
-      this.currentUser.set(JSON.parse(rawUser) as User);
-    } catch {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(USER_KEY);
-      this.currentUser.set(null);
+    const user = readUser();
+    if (!user) {
+      this.clearSession();
+      return;
     }
+    this.currentUser.set(user);
   }
 
   private persist(res: AuthResponse): void {
-    localStorage.setItem(TOKEN_KEY, res.token);
-    localStorage.setItem(USER_KEY, JSON.stringify(res.user));
+    writeSession(res.token, res.refreshToken ?? null, res.user);
     this.currentUser.set(res.user);
   }
 }

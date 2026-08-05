@@ -3,6 +3,7 @@ import * as signalR from '@microsoft/signalr';
 import { Subject } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { MemoryUpdate, ProjectMemory, Run, RunEvent } from '../core/models';
+import { readAccessToken } from '../core/utils/auth-storage';
 
 export type ConnectionState = 'connected' | 'connecting' | 'disconnected';
 
@@ -97,7 +98,12 @@ export class SignalRService {
     }
 
     const conn = new signalR.HubConnectionBuilder()
-      .withUrl(`${environment.apiUrl}/hubs/run`)
+      .withUrl(`${environment.apiUrl}/hubs/run`, {
+        // The hubs are behind RequireAuthorization(); WebSocket handshakes can't carry an
+        // Authorization header, so the server reads ?access_token= (Program.cs OnMessageReceived).
+        // Read it lazily on every (re)connect so a refreshed token is picked up.
+        accessTokenFactory: () => readAccessToken() ?? '',
+      })
       .withAutomaticReconnect()
       .build();
 
@@ -152,7 +158,12 @@ export class SignalRService {
     }
 
     const conn = new signalR.HubConnectionBuilder()
-      .withUrl(`${environment.apiUrl}/hubs/project`)
+      .withUrl(`${environment.apiUrl}/hubs/project`, {
+        // The hubs are behind RequireAuthorization(); WebSocket handshakes can't carry an
+        // Authorization header, so the server reads ?access_token= (Program.cs OnMessageReceived).
+        // Read it lazily on every (re)connect so a refreshed token is picked up.
+        accessTokenFactory: () => readAccessToken() ?? '',
+      })
       .withAutomaticReconnect()
       .build();
 
@@ -192,7 +203,12 @@ export class SignalRService {
     }
 
     const conn = new signalR.HubConnectionBuilder()
-      .withUrl(`${environment.apiUrl}/hubs/memory`)
+      .withUrl(`${environment.apiUrl}/hubs/memory`, {
+        // The hubs are behind RequireAuthorization(); WebSocket handshakes can't carry an
+        // Authorization header, so the server reads ?access_token= (Program.cs OnMessageReceived).
+        // Read it lazily on every (re)connect so a refreshed token is picked up.
+        accessTokenFactory: () => readAccessToken() ?? '',
+      })
       .withAutomaticReconnect()
       .build();
 

@@ -43,7 +43,7 @@ export class App {
     return this.translate.getCurrentLang() || 'fr';
   }
 
-  logout(): void {
-    this.authService.logout();
+  async logout(): Promise<void> {
+    await this.authService.logout();
   }
 }

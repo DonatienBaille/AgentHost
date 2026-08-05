@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
 import { TranslatePipe } from '@ngx-translate/core';
 import { AuthService } from '../../services/auth.service';
@@ -19,6 +19,7 @@ export class LoginComponent {
   private readonly fb = inject(FormBuilder);
   private readonly authService = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   readonly mode = signal<AuthMode>('login');
   readonly isSubmitting = signal(false);
@@ -39,6 +40,11 @@ export class LoginComponent {
     password: ['', [Validators.required, Validators.minLength(8)]],
     displayName: [''],
   });
+
+  /** Where to land after a successful sign-in: the URL the user was bounced away from, or home. */
+  private returnUrl(): string {
+    return sanitizeReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl'));
+  }
 
   switchMode(mode: AuthMode): void {
     this.mode.set(mode);
@@ -64,7 +70,7 @@ export class LoginComponent {
     try {
       const { email, password } = this.loginForm.getRawValue();
       await this.authService.login(email!, password!);
-      await this.router.navigate(['/']);
+      await this.router.navigateByUrl(this.returnUrl());
     } catch (err) {
       this.errorKey.set(
         err instanceof HttpErrorResponse && err.status === 401
@@ -92,7 +98,7 @@ export class LoginComponent {
         password!,
         displayName || undefined,
       );
-      await this.router.navigate(['/']);
+      await this.router.navigateByUrl(this.returnUrl());
     } catch (err) {
       this.errorKey.set(
         err instanceof HttpErrorResponse && err.status === 409
@@ -103,6 +109,17 @@ export class LoginComponent {
       this.isSubmitting.set(false);
     }
   }
+}
+
+/**
+ * Only same-origin absolute paths are honoured, so a crafted
+ * `?returnUrl=https://evil.example` link can't turn the login form into an open redirect.
+ */
+function sanitizeReturnUrl(value: string | null): string {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) {
+    return '/';
+  }
+  return value;
 }
 
 function slugify(value: string): string {
