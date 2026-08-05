@@ -1,3 +1,4 @@
+using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Services;
 
 namespace AgentHost.Api.Endpoints;
@@ -6,7 +7,8 @@ public static class AuditEndpoints
 {
     public static IEndpointRouteBuilder MapAuditEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/organizations/{orgId}/audit-log", ListAuditLog).WithTags("Audit").WithName("ListAuditLog");
+        app.MapGet("/api/organizations/{orgId}/audit-log", ListAuditLog).WithTags("Audit").WithName("ListAuditLog")
+            .RequireAuthorization(AuthorizationPolicies.Maintainer);
         return app;
     }
 

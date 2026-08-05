@@ -31,6 +31,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "agenthost.fullname" . }}-secrets
                   key: connectionString
+            - name: Secrets__EncryptionKey
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agenthost.fullname" . }}-secrets
+                  key: encryptionKey
+            - name: Jwt__Secret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agenthost.fullname" . }}-secrets
+                  key: jwtSecret
           resources:
             {{- toYaml .Values.resources.backend | nindent 12 }}
           readinessProbe:

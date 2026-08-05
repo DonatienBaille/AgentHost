@@ -17,7 +17,7 @@ public interface IUserRepository
 public class UserRepository : IUserRepository
 {
     private const string SelectColumns = """
-        id, org_id, email, display_name, avatar_url, role,
+        id, org_id, email, display_name, avatar_url, role, password_hash,
         created_at, updated_at, deleted_at
         """;
 
@@ -55,8 +55,8 @@ public class UserRepository : IUserRepository
     public async Task InsertAsync(User user, CancellationToken ct = default)
     {
         const string sql = """
-            INSERT INTO users (id, org_id, email, display_name, avatar_url, role, created_at, updated_at)
-            VALUES (@Id, @OrgId, @Email, @DisplayName, @AvatarUrl, @Role, @CreatedAt, @UpdatedAt)
+            INSERT INTO users (id, org_id, email, display_name, avatar_url, role, password_hash, created_at, updated_at)
+            VALUES (@Id, @OrgId, @Email, @DisplayName, @AvatarUrl, @Role, @PasswordHash, @CreatedAt, @UpdatedAt)
             """;
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, user, cancellationToken: ct));
@@ -67,7 +67,8 @@ public class UserRepository : IUserRepository
     {
         const string sql = """
             UPDATE users
-            SET display_name = @DisplayName, avatar_url = @AvatarUrl, role = @Role, updated_at = @UpdatedAt
+            SET display_name = @DisplayName, avatar_url = @AvatarUrl, role = @Role,
+                password_hash = @PasswordHash, updated_at = @UpdatedAt
             WHERE id = @Id
             """;
         using var db = _connectionFactory.CreateConnection();

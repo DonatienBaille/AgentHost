@@ -10,11 +10,12 @@ public static class UserEndpoints
 {
     public static IEndpointRouteBuilder MapUserEndpoints(this IEndpointRouteBuilder app)
     {
-        var usersApi = app.MapGroup("/api/users").WithTags("Users");
+        var usersApi = app.MapGroup("/api/users").WithTags("Users").RequireAuthorization();
 
         usersApi.MapGet("/{id}", GetUser).WithName("GetUser");
         usersApi.MapGet("/", ListUsers).WithName("ListUsers");
-        usersApi.MapPost("/", CreateUser).WithName("CreateUser").WithValidation<CreateUserRequest>();
+        usersApi.MapPost("/", CreateUser).WithName("CreateUser").WithValidation<CreateUserRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Maintainer);
 
         return app;
     }
@@ -41,6 +42,7 @@ public static class UserEndpoints
             Email = req.Email,
             DisplayName = req.DisplayName,
             Role = req.Role,
+            PasswordHash = PasswordHasher.Hash(req.Password),
             CreatedAt = now,
             UpdatedAt = now,
         };

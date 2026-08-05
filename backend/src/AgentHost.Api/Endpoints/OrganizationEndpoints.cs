@@ -10,11 +10,14 @@ public static class OrganizationEndpoints
 {
     public static IEndpointRouteBuilder MapOrganizationEndpoints(this IEndpointRouteBuilder app)
     {
-        var orgsApi = app.MapGroup("/api/organizations").WithTags("Organizations");
+        var orgsApi = app.MapGroup("/api/organizations").WithTags("Organizations").RequireAuthorization();
 
         orgsApi.MapGet("/", ListOrganizations).WithName("ListOrganizations");
         orgsApi.MapGet("/{id}", GetOrganization).WithName("GetOrganization");
-        orgsApi.MapPost("/", CreateOrganization).WithName("CreateOrganization").WithValidation<CreateOrganizationRequest>();
+        // Normal signup goes through POST /api/auth/register (creates org + owner together);
+        // this endpoint is for an existing owner provisioning an additional organization.
+        orgsApi.MapPost("/", CreateOrganization).WithName("CreateOrganization").WithValidation<CreateOrganizationRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Owner);
 
         return app;
     }

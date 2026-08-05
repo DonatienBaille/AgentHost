@@ -15,9 +15,10 @@ public static class SecretEndpoints
 {
     public static IEndpointRouteBuilder MapSecretEndpoints(this IEndpointRouteBuilder app)
     {
-        var secretsApi = app.MapGroup("/api/secrets").WithTags("Secrets");
+        var secretsApi = app.MapGroup("/api/secrets").WithTags("Secrets").RequireAuthorization();
 
-        secretsApi.MapPost("/", CreateSecret).WithName("CreateSecret").WithValidation<CreateSecretRequest>();
+        secretsApi.MapPost("/", CreateSecret).WithName("CreateSecret").WithValidation<CreateSecretRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Maintainer);
 
         return app;
     }

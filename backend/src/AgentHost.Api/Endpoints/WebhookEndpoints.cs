@@ -10,11 +10,12 @@ public static class WebhookEndpoints
 {
     public static IEndpointRouteBuilder MapWebhookEndpoints(this IEndpointRouteBuilder app)
     {
-        var webhooksApi = app.MapGroup("/api/webhooks").WithTags("Webhooks");
+        var webhooksApi = app.MapGroup("/api/webhooks").WithTags("Webhooks").RequireAuthorization();
 
         webhooksApi.MapGet("/{id}", GetWebhook).WithName("GetWebhook");
         webhooksApi.MapGet("/", ListWebhooks).WithName("ListWebhooks");
-        webhooksApi.MapPost("/", CreateWebhook).WithName("CreateWebhook").WithValidation<CreateWebhookRequest>();
+        webhooksApi.MapPost("/", CreateWebhook).WithName("CreateWebhook").WithValidation<CreateWebhookRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Maintainer);
 
         return app;
     }

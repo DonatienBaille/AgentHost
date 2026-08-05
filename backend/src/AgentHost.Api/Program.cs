@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json.Serialization;
 using AgentHost.Api.Endpoints;
 using AgentHost.Api.Hubs;
@@ -6,6 +7,8 @@ using AgentHost.Api.Repositories;
 using AgentHost.Api.Services;
 using Docker.DotNet;
 using FluentValidation;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Serilog.Formatting.Compact;
 using StackExchange.Redis;
@@ -93,10 +96,53 @@ builder.Services.AddScoped<IEventBus, SignalREventBus>();
 builder.Services.AddScoped<RunStateMachine>();
 builder.Services.AddScoped<ISecretsBroker, SecretsBroker>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddSingleton<IAgentManifestParser, AgentManifestParser>();
+builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 
 // ---- Validation ----
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+// ---- AuthN/AuthZ (JWT bearer; roles: owner > maintainer > developer > viewer) ----
+var jwtSecret = builder.Configuration["Jwt:Secret"]
+    ?? throw new InvalidOperationException("Jwt:Secret is not configured");
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "agenthost";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "agenthost";
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        // Without this, the handler remaps short claim names (e.g. "sub") to long legacy URIs
+        // (ClaimTypes.NameIdentifier) via its DefaultInboundClaimTypeMap, which would break any
+        // code — like GET /api/auth/me — that reads JwtRegisteredClaimNames.Sub off the principal.
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromSeconds(30),
+        };
+
+        // Browsers can't set Authorization headers on WebSocket upgrades, so SignalR clients
+        // pass the token as ?access_token=... instead; forward it into the normal JWT pipeline.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                    context.Token = accessToken;
+                return Task.CompletedTask;
+            },
+        };
+    });
+
+builder.Services.AddAuthorizationPolicies();
 
 // ---- SignalR ----
 // AddJsonProtocol uses its own JsonSerializerOptions, separate from ConfigureHttpJsonOptions
@@ -166,10 +212,14 @@ using (var scope = app.Services.CreateScope())
 
 app.UseCors("Frontend");
 
-app.MapHub<RunHub>("/hubs/run");
-app.MapHub<ProjectHub>("/hubs/project");
-app.MapHub<AgentMemoryHub>("/hubs/memory");
+app.UseAuthentication();
+app.UseAuthorization();
 
+app.MapHub<RunHub>("/hubs/run").RequireAuthorization();
+app.MapHub<ProjectHub>("/hubs/project").RequireAuthorization();
+app.MapHub<AgentMemoryHub>("/hubs/memory").RequireAuthorization();
+
+app.MapAuthEndpoints();
 app.MapRunEndpoints();
 app.MapAgentEndpoints();
 app.MapProjectEndpoints();
@@ -181,7 +231,7 @@ app.MapUserEndpoints();
 app.MapAuditEndpoints();
 app.MapSecretEndpoints();
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
 
 app.Run();
 

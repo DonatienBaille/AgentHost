@@ -1,4 +1,5 @@
 using AgentHost.Api.Contracts;
+using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Services;
 using AgentHost.Api.Validation;
 
@@ -8,14 +9,18 @@ public static class RunEndpoints
 {
     public static IEndpointRouteBuilder MapRunEndpoints(this IEndpointRouteBuilder app)
     {
-        var runsApi = app.MapGroup("/api/runs").WithTags("Runs");
+        var runsApi = app.MapGroup("/api/runs").WithTags("Runs").RequireAuthorization();
 
-        runsApi.MapPost("/", CreateRun).WithName("CreateRun").WithValidation<CreateRunRequest>();
+        runsApi.MapPost("/", CreateRun).WithName("CreateRun").WithValidation<CreateRunRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Developer);
         runsApi.MapGet("/{id}", GetRun).WithName("GetRun");
         runsApi.MapGet("/", ListRuns).WithName("ListRuns");
-        runsApi.MapPost("/{id}/approve", ApproveRun).WithName("ApproveRun").WithValidation<ApprovalRequest>();
-        runsApi.MapPost("/{id}/answer", AnswerQuestion).WithName("AnswerQuestion").WithValidation<AnswerQuestionRequest>();
-        runsApi.MapPost("/{id}/cancel", CancelRun).WithName("CancelRun");
+        runsApi.MapPost("/{id}/approve", ApproveRun).WithName("ApproveRun").WithValidation<ApprovalRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Developer);
+        runsApi.MapPost("/{id}/answer", AnswerQuestion).WithName("AnswerQuestion").WithValidation<AnswerQuestionRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Developer);
+        runsApi.MapPost("/{id}/cancel", CancelRun).WithName("CancelRun")
+            .RequireAuthorization(AuthorizationPolicies.Developer);
         runsApi.MapGet("/{id}/events", GetRunEvents).WithName("GetRunEvents");
         runsApi.MapGet("/{id}/logs", GetRunLogs).WithName("GetRunLogs");
 

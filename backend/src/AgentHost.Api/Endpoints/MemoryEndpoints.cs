@@ -1,4 +1,5 @@
 using AgentHost.Api.Contracts;
+using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Services;
 
 namespace AgentHost.Api.Endpoints;
@@ -7,9 +8,12 @@ public static class MemoryEndpoints
 {
     public static IEndpointRouteBuilder MapMemoryEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/projects/{id}/memory", GetProjectMemory).WithTags("Memory").WithName("GetProjectMemory");
-        app.MapPost("/api/projects/{id}/memory", UpdateProjectMemory).WithTags("Memory").WithName("UpdateProjectMemory");
-        app.MapPost("/api/projects/{id}/memory/archive", ArchiveOldRuns).WithTags("Memory").WithName("ArchiveProjectMemory");
+        app.MapGet("/api/projects/{id}/memory", GetProjectMemory).WithTags("Memory").WithName("GetProjectMemory")
+            .RequireAuthorization();
+        app.MapPost("/api/projects/{id}/memory", UpdateProjectMemory).WithTags("Memory").WithName("UpdateProjectMemory")
+            .RequireAuthorization(AuthorizationPolicies.Developer);
+        app.MapPost("/api/projects/{id}/memory/archive", ArchiveOldRuns).WithTags("Memory").WithName("ArchiveProjectMemory")
+            .RequireAuthorization(AuthorizationPolicies.Developer);
 
         return app;
     }

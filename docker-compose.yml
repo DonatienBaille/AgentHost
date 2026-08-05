@@ -47,6 +47,10 @@ services:
       # Dev-only AES-256 key (32 bytes, base64) so encrypted secrets survive container
       # restarts. Generate your own for any non-throwaway environment.
       Secrets__EncryptionKey: "5ijlcr2IxwxqH7PEwsUIGQSvbZ/w6EMuOk3mXorL54c="
+      # Dev-only JWT signing secret. Generate your own for any non-throwaway environment.
+      Jwt__Secret: "hkA6jtNJGUsnP4++43POCQPqDtH2ABIaIUKj9gXxeJmXnpv5kYxiR9tRYT+JUzke"
+      Jwt__Issuer: agenthost
+      Jwt__Audience: agenthost
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - ./runs:/var/agenthost/runs

@@ -1,4 +1,5 @@
 using AgentHost.Api.Contracts;
+using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Services;
 using AgentHost.Api.Validation;
 
@@ -8,11 +9,12 @@ public static class AgentEndpoints
 {
     public static IEndpointRouteBuilder MapAgentEndpoints(this IEndpointRouteBuilder app)
     {
-        var agentsApi = app.MapGroup("/api/agents").WithTags("Agents");
+        var agentsApi = app.MapGroup("/api/agents").WithTags("Agents").RequireAuthorization();
 
         agentsApi.MapGet("/", ListAgents).WithName("ListAgents");
         agentsApi.MapGet("/{id}", GetAgent).WithName("GetAgent");
-        agentsApi.MapPost("/", CreateAgent).WithName("CreateAgent").WithValidation<CreateAgentRequest>();
+        agentsApi.MapPost("/", CreateAgent).WithName("CreateAgent").WithValidation<CreateAgentRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Developer);
 
         return app;
     }

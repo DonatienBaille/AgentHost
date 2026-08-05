@@ -62,3 +62,5 @@ networkPolicy:
 secrets:
   # Populate via --set or an external Secret; never commit real values.
   connectionString: ""
+  encryptionKey: ""
+  jwtSecret: ""

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace AgentHost.Api.Domain;
 
 public class User
@@ -10,6 +12,10 @@ public class User
     public string? AvatarUrl { get; set; }
 
     public UserRole Role { get; set; } = UserRole.Developer;
+
+    // Never serialized back to clients — set via PasswordHasher, checked via AuthService.
+    [JsonIgnore]
+    public string? PasswordHash { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

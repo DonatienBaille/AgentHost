@@ -11,11 +11,11 @@ public static class ApprovalEndpoints
 {
     public static IEndpointRouteBuilder MapApprovalEndpoints(this IEndpointRouteBuilder app)
     {
-        var approvalsApi = app.MapGroup("/api/approvals").WithTags("Approvals");
+        var approvalsApi = app.MapGroup("/api/approvals").WithTags("Approvals").RequireAuthorization();
 
         approvalsApi.MapGet("/{id}", GetApproval).WithName("GetApproval");
 
-        app.MapGet("/api/runs/{runId}/approvals", ListApprovalsForRun).WithName("ListApprovalsForRun");
+        app.MapGet("/api/runs/{runId}/approvals", ListApprovalsForRun).WithName("ListApprovalsForRun").RequireAuthorization();
 
         return app;
     }

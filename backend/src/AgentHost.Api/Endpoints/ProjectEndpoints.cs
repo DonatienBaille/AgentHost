@@ -1,4 +1,5 @@
 using AgentHost.Api.Contracts;
+using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Services;
 using AgentHost.Api.Validation;
 
@@ -8,12 +9,14 @@ public static class ProjectEndpoints
 {
     public static IEndpointRouteBuilder MapProjectEndpoints(this IEndpointRouteBuilder app)
     {
-        var projectsApi = app.MapGroup("/api/projects").WithTags("Projects");
+        var projectsApi = app.MapGroup("/api/projects").WithTags("Projects").RequireAuthorization();
 
         projectsApi.MapGet("/", ListProjects).WithName("ListProjects");
         projectsApi.MapGet("/{id}", GetProject).WithName("GetProject");
-        projectsApi.MapPost("/", CreateProject).WithName("CreateProject").WithValidation<CreateProjectRequest>();
-        projectsApi.MapPut("/{id}", UpdateProject).WithName("UpdateProject").WithValidation<UpdateProjectRequest>();
+        projectsApi.MapPost("/", CreateProject).WithName("CreateProject").WithValidation<CreateProjectRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Developer);
+        projectsApi.MapPut("/{id}", UpdateProject).WithName("UpdateProject").WithValidation<UpdateProjectRequest>()
+            .RequireAuthorization(AuthorizationPolicies.Developer);
 
         return app;
     }
