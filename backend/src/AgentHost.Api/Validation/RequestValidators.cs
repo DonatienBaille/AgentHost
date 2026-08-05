@@ -40,6 +40,14 @@ public class CreateAgentRequestValidator : AbstractValidator<CreateAgentRequest>
     }
 }
 
+public class PublishAgentVersionRequestValidator : AbstractValidator<PublishAgentVersionRequest>
+{
+    public PublishAgentVersionRequestValidator()
+    {
+        RuleFor(x => x.ManifestYaml).NotEmpty();
+    }
+}
+
 public class CreateProjectRequestValidator : AbstractValidator<CreateProjectRequest>
 {
     public CreateProjectRequestValidator()
