@@ -173,3 +173,33 @@ public class AcceptInvitationRequestValidator : AbstractValidator<AcceptInvitati
         RuleFor(x => x.Password).Password();
     }
 }
+
+public class PasswordResetRequestRequestValidator : AbstractValidator<PasswordResetRequestRequest>
+{
+    public PasswordResetRequestRequestValidator()
+    {
+        // Note: a malformed address still 400s, which is a *format* judgement and reveals nothing
+        // about whether any account exists. Existence is never signalled — see the endpoint.
+        RuleFor(x => x.Email).NotEmpty().EmailAddress();
+    }
+}
+
+/// <summary>Resetting sets a password, so it clears the same bar as signup.</summary>
+public class PasswordResetConfirmRequestValidator : AbstractValidator<PasswordResetConfirmRequest>
+{
+    public PasswordResetConfirmRequestValidator()
+    {
+        RuleFor(x => x.Token).NotEmpty();
+        RuleFor(x => x.NewPassword).Password();
+    }
+}
+
+/// <summary>Changing a password sets a password, so it clears the same bar as signup.</summary>
+public class ChangePasswordRequestValidator : AbstractValidator<ChangePasswordRequest>
+{
+    public ChangePasswordRequestValidator()
+    {
+        RuleFor(x => x.CurrentPassword).NotEmpty();
+        RuleFor(x => x.NewPassword).Password();
+    }
+}
