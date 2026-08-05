@@ -6,13 +6,15 @@ using Xunit;
 namespace AgentHost.Api.Tests.Integration;
 
 /// <summary>
-/// Program.cs configures a global fixed-window limiter: 120 requests/minute per identity
-/// (falls back to client IP for anonymous callers), QueueLimit 0 (over-limit requests are
-/// rejected immediately, not queued) — see the AddRateLimiter block in Program.cs. The limiter
-/// (UseRateLimiter) runs AFTER UseAuthentication/UseAuthorization in the pipeline, so a request
-/// to an endpoint that requires auth and has none never reaches the limiter at all (Authorization
-/// middleware 401s it first) — this fires at POST /api/auth/login instead, which is AllowAnonymous
-/// and so actually reaches UseRateLimiter on every call.
+/// Program.cs configures a chained global fixed-window limiter: 120 requests/minute per identity
+/// (falls back to client IP for anonymous callers) for everything, plus a stricter 20/minute bucket
+/// on /api/auth/* — the brute-force surface. QueueLimit is 0 on both (over-limit requests are
+/// rejected immediately, not queued) — see the AddRateLimiter block in Program.cs.
+///
+/// UseRateLimiter runs BEFORE UseAuthentication/UseAuthorization, so unauthenticated floods against
+/// protected endpoints are limited too (they used to be 401'd by the authorization middleware
+/// before the limiter ever saw them). This test fires at POST /api/auth/login, which is both
+/// AllowAnonymous and covered by the stricter auth bucket.
 ///
 /// This intentionally does NOT share <see cref="IntegrationCollection"/>'s factory: it owns a
 /// private <see cref="RateLimitedApiFactory"/> instance so tripping the limiter here can never

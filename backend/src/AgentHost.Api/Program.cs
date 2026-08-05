@@ -9,8 +9,15 @@ using AgentHost.Api.Services;
 using Docker.DotNet;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql; // TracerProviderBuilder.AddNpgsql (Npgsql.OpenTelemetry)
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Formatting.Compact;
 using StackExchange.Redis;
@@ -56,27 +63,12 @@ builder.Services.AddSingleton<DockerClient>(_ =>
 // Redis is optional (spec 4.1: "optional, cache/sessions") — wrapped in a holder so a
 // missing/unreachable Redis never blocks startup; consumers check RedisConnectionHolder.Multiplexer
 // for null before use.
-builder.Services.AddSingleton(sp =>
-{
-    var logger = sp.GetRequiredService<Serilog.ILogger>();
-    var redisHost = builder.Configuration["Redis:Host"];
-    if (string.IsNullOrWhiteSpace(redisHost))
-        return new RedisConnectionHolder(null);
-
-    var redisPort = builder.Configuration["Redis:Port"] ?? "6379";
-    try
-    {
-        var options = ConfigurationOptions.Parse($"{redisHost}:{redisPort}");
-        options.AbortOnConnectFail = false;
-        options.ConnectTimeout = 2000;
-        return new RedisConnectionHolder(ConnectionMultiplexer.Connect(options));
-    }
-    catch (Exception ex)
-    {
-        logger.Warning(ex, "Could not connect to Redis at {Host}:{Port}; continuing without cache", redisHost, redisPort);
-        return new RedisConnectionHolder(null);
-    }
-});
+//
+// Connected eagerly here (rather than lazily inside the DI factory) because the SignalR
+// registration below has to know, at service-registration time, whether a backplane can be wired
+// up. `redisConnection` is null whenever Redis is unconfigured or unreachable.
+var redisConnection = ConnectRedis(builder.Configuration, Log.Logger);
+builder.Services.AddSingleton(new RedisConnectionHolder(redisConnection));
 
 // ---- Repositories ----
 builder.Services.AddScoped<IRunRepository, RunRepository>();
@@ -170,7 +162,7 @@ builder.Services.AddHostedService<RunDataJanitor>();
 // AddJsonProtocol uses its own JsonSerializerOptions, separate from ConfigureHttpJsonOptions
 // below — without this, hub payloads (Run/RunEvent broadcasts) would serialize enums as
 // PascalCase while the REST API serializes them as snake_case. Keep both in sync.
-builder.Services.AddSignalR()
+var signalR = builder.Services.AddSignalR()
     .AddHubOptions<RunHub>(options => options.MaximumReceiveMessageSize = 1_000_000)
     .AddJsonProtocol(options =>
     {
@@ -182,6 +174,26 @@ builder.Services.AddSignalR()
         options.PayloadSerializerOptions.Converters.Add(new SecretScopeJsonConverter());
         options.PayloadSerializerOptions.Converters.Add(new UserRoleJsonConverter());
     });
+
+// SignalR backplane. Without it, hub state is per-process: a client connected to replica A never
+// sees an event published by replica B, so any deployment with more than one backend replica
+// silently drops run events. Enabled whenever Redis is actually reachable, following the same
+// optional-Redis pattern as the cache — an unconfigured/unreachable Redis degrades to the
+// in-memory hub lifetime manager (correct for the single-replica default) rather than failing.
+if (redisConnection is not null)
+{
+    signalR.AddStackExchangeRedis(options =>
+    {
+        options.Configuration.ChannelPrefix = StackExchange.Redis.RedisChannel.Literal("agenthost");
+        options.ConnectionFactory = _ => Task.FromResult<IConnectionMultiplexer>(redisConnection);
+    });
+    Log.Logger.Information("SignalR Redis backplane enabled");
+}
+else
+{
+    Log.Logger.Information("SignalR running without a backplane (Redis not configured/reachable); " +
+                           "this is only correct with a single backend replica");
+}
 
 // ---- CORS ----
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
@@ -215,24 +227,107 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 builder.Services.AddEndpointsApiExplorer();
 
-// ---- Rate limiting: 120 requests/minute per authenticated user (falls back to client IP) ----
+// ---- Forwarded headers ----
+// The rate limiter's anonymous partition and every access log line use RemoteIpAddress. Behind the
+// bundled nginx (or any ingress) that is the proxy's address, so without this every anonymous
+// caller in the world shares one bucket. X-Forwarded-For/-Proto are trivially spoofable when they
+// come from an untrusted peer, so they are only honoured from proxies we know about:
+// ForwardedHeaders:KnownProxies / :KnownNetworks (CIDR). Empty defaults are deliberately
+// permissive-for-loopback only — the framework already trusts 127.0.0.1/::1 — and a deployment
+// behind a proxy on another host MUST list it, otherwise the headers are ignored (safe default:
+// everyone shares the proxy bucket) rather than trusted blindly.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 1;
+
+    foreach (var proxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? Array.Empty<string>())
+    {
+        if (System.Net.IPAddress.TryParse(proxy, out var address))
+            options.KnownProxies.Add(address);
+    }
+
+    foreach (var network in builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? Array.Empty<string>())
+    {
+        var parts = network.Split('/');
+        if (parts.Length == 2 && System.Net.IPAddress.TryParse(parts[0], out var prefix) && int.TryParse(parts[1], out var length))
+            options.KnownNetworks.Add(new IPNetwork(prefix, length));
+    }
+});
+
+// ---- Rate limiting ----
+// Two chained partitions, both installed as the global limiter so a request must satisfy both:
+//   * 120 requests/minute per identity for everything;
+//   * a much tighter bucket on the unauthenticated auth endpoints, which are the brute-force
+//     surface (credential stuffing against /api/auth/login costs an attacker nothing otherwise).
+// Chaining rather than per-endpoint policies keeps this entirely in Program.cs and keeps the test
+// factories' "clear GlobalLimiter to disable rate limiting" arrangement working.
 builder.Services.AddRateLimiter(options =>
 {
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+    var generalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
             // Partition on the token's subject, not Identity.Name: our JWTs carry no `name` claim
             // (MapInboundClaims is off), so Identity.Name is always null and every authenticated
             // caller in the system silently shared a single IP-keyed bucket. GetUserId() reads the
             // `sub` claim — a user id for a user token, a run id for an agent run token — which is
             // the "per authenticated user" partition this limiter was documented to apply.
-            ctx.User.GetUserId() ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            //
+            // NOTE: the limiter now runs BEFORE authentication (see the pipeline below), so
+            // GetUserId() is only populated for endpoints that authenticated earlier in the
+            // request... which is none of them. In practice this means the general limiter
+            // partitions anonymous traffic by client IP and authenticated traffic by IP too. The
+            // `sub` branch is kept because it is correct the moment authentication moves ahead of
+            // the limiter again, and it is what agent run tokens partition on when it does.
+            ctx.User.GetUserId() ?? ClientKey(ctx),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+
+    var authLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+        IsAuthEndpoint(ctx)
+            ? RateLimitPartition.GetFixedWindowLimiter(
+                $"auth:{ClientKey(ctx)}",
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })
+            : RateLimitPartition.GetNoLimiter<string>("auth:exempt"));
+
+    options.GlobalLimiter = PartitionedRateLimiter.CreateChained(generalLimiter, authLimiter);
     options.OnRejected = (ctx, ct) =>
     {
         ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         return ValueTask.CompletedTask;
     };
 });
+
+// ---- OpenTelemetry (spec section 14.2) ----
+// Metrics are always collected and exposed on /metrics (cheap, in-process). Traces are only
+// exported when OpenTelemetry:OtlpEndpoint is set, so dev and the test host stay no-op.
+var otlpEndpoint = builder.Configuration["OpenTelemetry:OtlpEndpoint"];
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(
+        serviceName: builder.Configuration["OpenTelemetry:ServiceName"] ?? "agenthost-backend",
+        serviceVersion: typeof(Program).Assembly.GetName().Version?.ToString()))
+    .WithMetrics(metrics => metrics
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddRuntimeInstrumentation()
+        .AddMeter("Npgsql")
+        .AddPrometheusExporter())
+    .WithTracing(tracing =>
+    {
+        tracing
+            .AddAspNetCoreInstrumentation(o => o.Filter = ctx =>
+                // Probes and the scrape endpoint would otherwise dominate the trace volume.
+                !ctx.Request.Path.StartsWithSegments("/health") && !ctx.Request.Path.StartsWithSegments("/metrics"))
+            .AddHttpClientInstrumentation()
+            .AddNpgsql();
+
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+            tracing.AddOtlpExporter(o => o.Endpoint = new Uri(otlpEndpoint));
+    });
+
+// ---- Health checks ----
+// "ready" is the tag that separates readiness (needs its dependencies) from liveness (process is
+// running and the event loop responds); see the /health endpoints below.
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database", tags: new[] { "ready" });
 
 var app = builder.Build();
 
@@ -251,11 +346,20 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+// Must run before anything that reads the client IP or scheme (rate limiter partitions, logs).
+app.UseForwardedHeaders();
+
 app.UseCors("Frontend");
 
+// Documented middleware order: UseRouting -> UseRateLimiter -> UseAuthentication -> UseAuthorization.
+// The limiter used to sit after authorization, so an anonymous flood against a protected endpoint
+// was 401'd before the limiter ever saw it — i.e. exactly the abuse it exists to stop was exempt
+// from it. UseRouting is explicit here so the limiter can see endpoint metadata
+// (DisableRateLimiting on /health, /metrics) even though minimal APIs would add it implicitly.
+app.UseRouting();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseRateLimiter();
 
 app.MapHub<RunHub>("/hubs/run").RequireAuthorization();
 app.MapHub<ProjectHub>("/hubs/project").RequireAuthorization();
@@ -276,9 +380,73 @@ app.MapUserEndpoints();
 app.MapAuditEndpoints();
 app.MapSecretEndpoints();
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous().DisableRateLimiting();
+// ---- Health probes ----
+// /health/live  — process is up and serving; no dependency is consulted, so a database outage
+//                 never causes an orchestrator to restart otherwise-healthy pods.
+// /health/ready — dependencies tagged "ready" (currently Postgres) are reachable; this is what
+//                 load balancers should gate traffic on.
+// /health       — kept as an alias of liveness so existing probes/compose files keep working.
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
+    .AllowAnonymous().DisableRateLimiting();
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") })
+    .AllowAnonymous().DisableRateLimiting();
+app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false })
+    .AllowAnonymous().DisableRateLimiting();
+
+// Prometheus scrape endpoint. It exposes internal operational detail (route names, in-flight
+// requests, GC state), so it is NOT proxied by the bundled nginx — scrape the backend directly on
+// its own port/network. See nginx.conf, which returns 404 for /metrics.
+app.MapPrometheusScrapingEndpoint("/metrics").AllowAnonymous().DisableRateLimiting();
 
 app.Run();
+
+/// <summary>
+/// Connects to Redis when configured, returning null when it is not configured or not reachable —
+/// Redis is optional (spec 4.1), so neither case may block startup.
+/// </summary>
+static IConnectionMultiplexer? ConnectRedis(IConfiguration config, Serilog.ILogger logger)
+{
+    var redisHost = config["Redis:Host"];
+    if (string.IsNullOrWhiteSpace(redisHost))
+        return null;
+
+    var redisPort = config["Redis:Port"] ?? "6379";
+    try
+    {
+        var options = ConfigurationOptions.Parse($"{redisHost}:{redisPort}");
+        options.AbortOnConnectFail = false;
+        options.ConnectTimeout = 2000;
+        var multiplexer = ConnectionMultiplexer.Connect(options);
+
+        // AbortOnConnectFail=false means Connect() succeeds even against a dead server (it keeps
+        // retrying in the background). Treat "not connected" as "no Redis": the SignalR backplane
+        // must not be wired to a connection that has never worked, and the cache path already
+        // null-checks the holder.
+        if (!multiplexer.IsConnected)
+        {
+            logger.Warning("Redis at {Host}:{Port} did not connect; continuing without cache/backplane",
+                redisHost, redisPort);
+            multiplexer.Dispose();
+            return null;
+        }
+
+        return multiplexer;
+    }
+    catch (Exception ex)
+    {
+        logger.Warning(ex, "Could not connect to Redis at {Host}:{Port}; continuing without cache/backplane",
+            redisHost, redisPort);
+        return null;
+    }
+}
+
+/// <summary>Rate-limit partition key for a caller with no authenticated identity.</summary>
+static string ClientKey(HttpContext ctx)
+    => ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+
+/// <summary>True for the unauthenticated credential endpoints that get the stricter limit.</summary>
+static bool IsAuthEndpoint(HttpContext ctx)
+    => ctx.Request.Path.StartsWithSegments("/api/auth", StringComparison.OrdinalIgnoreCase);
 
 /// <summary>Optional Redis connection wrapper; <see cref="Multiplexer"/> is null when Redis is not configured/reachable.</summary>
 public class RedisConnectionHolder
