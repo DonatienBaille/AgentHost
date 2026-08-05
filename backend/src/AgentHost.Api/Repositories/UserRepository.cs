@@ -12,6 +12,7 @@ public interface IUserRepository
     Task<List<User>> ListByOrgAsync(string orgId, CancellationToken ct = default);
     Task InsertAsync(User user, CancellationToken ct = default);
     Task UpdateAsync(User user, CancellationToken ct = default);
+    Task SoftDeleteAsync(string id, CancellationToken ct = default);
 }
 
 public class UserRepository : IUserRepository
@@ -74,5 +75,13 @@ public class UserRepository : IUserRepository
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, user, cancellationToken: ct));
         _logger.Information("Updated user {UserId}", user.Id);
+    }
+
+    public async Task SoftDeleteAsync(string id, CancellationToken ct = default)
+    {
+        const string sql = "UPDATE users SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id";
+        using var db = _connectionFactory.CreateConnection();
+        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        _logger.Information("Soft-deleted user {UserId}", id);
     }
 }

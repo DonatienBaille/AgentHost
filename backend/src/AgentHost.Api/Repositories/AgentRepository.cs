@@ -13,6 +13,7 @@ public interface IAgentRepository
     Task<List<Agent>> ListByProjectAsync(string projectId, CancellationToken ct = default);
     Task InsertAsync(Agent agent, CancellationToken ct = default);
     Task UpdateAsync(Agent agent, CancellationToken ct = default);
+    Task SoftDeleteAsync(string id, CancellationToken ct = default);
 }
 
 public class AgentRepository : IAgentRepository
@@ -99,5 +100,13 @@ public class AgentRepository : IAgentRepository
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, agent, cancellationToken: ct));
         _logger.Information("Updated agent {AgentId}", agent.Id);
+    }
+
+    public async Task SoftDeleteAsync(string id, CancellationToken ct = default)
+    {
+        const string sql = "UPDATE agents SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id";
+        using var db = _connectionFactory.CreateConnection();
+        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        _logger.Information("Soft-deleted agent {AgentId}", id);
     }
 }

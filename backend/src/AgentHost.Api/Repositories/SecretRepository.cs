@@ -13,6 +13,7 @@ public interface ISecretRepository
     Task InsertAsync(Secret secret, CancellationToken ct = default);
     Task UpdateAsync(Secret secret, CancellationToken ct = default);
     Task MarkUsedAsync(string id, string runId, CancellationToken ct = default);
+    Task SoftDeleteAsync(string id, CancellationToken ct = default);
 }
 
 public class SecretRepository : ISecretRepository
@@ -106,5 +107,13 @@ public class SecretRepository : ISecretRepository
             """;
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id, RunId = runId }, cancellationToken: ct));
+    }
+
+    public async Task SoftDeleteAsync(string id, CancellationToken ct = default)
+    {
+        const string sql = "UPDATE secrets SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id";
+        using var db = _connectionFactory.CreateConnection();
+        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        _logger.Information("Soft-deleted secret {SecretId}", id);
     }
 }

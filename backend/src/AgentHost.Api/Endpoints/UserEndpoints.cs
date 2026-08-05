@@ -16,6 +16,10 @@ public static class UserEndpoints
         usersApi.MapGet("/", ListUsers).WithName("ListUsers");
         usersApi.MapPost("/", CreateUser).WithName("CreateUser").WithValidation<CreateUserRequest>()
             .RequireAuthorization(AuthorizationPolicies.Maintainer);
+        usersApi.MapPut("/{id}", UpdateUser).WithName("UpdateUser")
+            .RequireAuthorization(AuthorizationPolicies.Maintainer);
+        usersApi.MapDelete("/{id}", DeleteUser).WithName("DeleteUser")
+            .RequireAuthorization(AuthorizationPolicies.Maintainer);
 
         return app;
     }
@@ -49,5 +53,28 @@ public static class UserEndpoints
 
         await repository.InsertAsync(user, ct);
         return Results.Created($"/api/users/{user.Id}", user);
+    }
+
+    private static async Task<IResult> UpdateUser(string id, UpdateUserRequest req, IUserRepository repository, CancellationToken ct)
+    {
+        var user = await repository.GetAsync(id, ct);
+        if (user is null) return Results.NotFound();
+
+        if (req.DisplayName is not null) user.DisplayName = req.DisplayName;
+        if (req.Role is not null) user.Role = req.Role.Value;
+        if (!string.IsNullOrEmpty(req.Password)) user.PasswordHash = PasswordHasher.Hash(req.Password);
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await repository.UpdateAsync(user, ct);
+        return Results.Ok(user);
+    }
+
+    private static async Task<IResult> DeleteUser(string id, IUserRepository repository, CancellationToken ct)
+    {
+        var user = await repository.GetAsync(id, ct);
+        if (user is null) return Results.NotFound();
+
+        await repository.SoftDeleteAsync(id, ct);
+        return Results.NoContent();
     }
 }

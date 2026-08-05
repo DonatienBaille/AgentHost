@@ -16,6 +16,10 @@ public static class WebhookEndpoints
         webhooksApi.MapGet("/", ListWebhooks).WithName("ListWebhooks");
         webhooksApi.MapPost("/", CreateWebhook).WithName("CreateWebhook").WithValidation<CreateWebhookRequest>()
             .RequireAuthorization(AuthorizationPolicies.Maintainer);
+        webhooksApi.MapPut("/{id}", UpdateWebhook).WithName("UpdateWebhook")
+            .RequireAuthorization(AuthorizationPolicies.Maintainer);
+        webhooksApi.MapDelete("/{id}", DeleteWebhook).WithName("DeleteWebhook")
+            .RequireAuthorization(AuthorizationPolicies.Maintainer);
 
         return app;
     }
@@ -49,5 +53,29 @@ public static class WebhookEndpoints
 
         await repository.InsertAsync(webhook, ct);
         return Results.Created($"/api/webhooks/{webhook.Id}", webhook);
+    }
+
+    private static async Task<IResult> UpdateWebhook(string id, UpdateWebhookRequest req, IWebhookRepository repository, CancellationToken ct)
+    {
+        var webhook = await repository.GetAsync(id, ct);
+        if (webhook is null) return Results.NotFound();
+
+        if (req.Url is not null) webhook.Url = req.Url;
+        if (req.Events is not null) webhook.Events = req.Events;
+        if (req.SecretToken is not null) webhook.SecretToken = req.SecretToken;
+        if (req.IsActive is not null) webhook.IsActive = req.IsActive.Value;
+        webhook.UpdatedAt = DateTime.UtcNow;
+
+        await repository.UpdateAsync(webhook, ct);
+        return Results.Ok(webhook);
+    }
+
+    private static async Task<IResult> DeleteWebhook(string id, IWebhookRepository repository, CancellationToken ct)
+    {
+        var webhook = await repository.GetAsync(id, ct);
+        if (webhook is null) return Results.NotFound();
+
+        await repository.DeleteAsync(id, ct);
+        return Results.NoContent();
     }
 }

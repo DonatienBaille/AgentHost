@@ -43,6 +43,7 @@ services:
       Redis__Port: "6379"
       Docker__Host: unix:///var/run/docker.sock
       Docker__WorkspacePath: /var/agenthost/runs
+      Artifacts__StoragePath: /var/agenthost/artifacts
       Cors__AllowedOrigins__0: http://localhost:4200
       # Dev-only AES-256 key (32 bytes, base64) so encrypted secrets survive container
       # restarts. Generate your own for any non-throwaway environment.
@@ -54,6 +55,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - ./runs:/var/agenthost/runs
+      - ./artifacts:/var/agenthost/artifacts
     depends_on:
       postgres:
         condition: service_healthy

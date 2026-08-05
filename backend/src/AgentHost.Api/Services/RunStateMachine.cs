@@ -18,12 +18,14 @@ public class RunStateMachine
 {
     private readonly IRunRepository _runRepository;
     private readonly IEventBus _eventBus;
+    private readonly IWebhookDispatcher _webhookDispatcher;
     private readonly ILogger _logger;
 
-    public RunStateMachine(IRunRepository runRepository, IEventBus eventBus, ILogger logger)
+    public RunStateMachine(IRunRepository runRepository, IEventBus eventBus, IWebhookDispatcher webhookDispatcher, ILogger logger)
     {
         _runRepository = runRepository;
         _eventBus = eventBus;
+        _webhookDispatcher = webhookDispatcher;
         _logger = logger;
     }
 
@@ -57,6 +59,13 @@ public class RunStateMachine
 
         _logger.Information("Run {RunId} transitioned {From} -> {To} ({Reason})",
             run.Id, previousStatus, newStatus, reason ?? "n/a");
+
+        if (newStatus.IsTerminal())
+        {
+            var payload = new { runId = run.Id, projectId = run.ProjectId, status = newStatus.ToDbString() };
+            await _webhookDispatcher.DispatchAsync(run.ProjectId, $"run.{newStatus.ToDbString()}", payload, ct);
+            await _webhookDispatcher.DispatchAsync(run.ProjectId, "run.finished", payload, ct);
+        }
     }
 
     public bool IsValidTransition(RunStatus from, RunStatus to)

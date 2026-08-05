@@ -29,6 +29,7 @@ public class ContainerOrchestrator : IContainerOrchestrator
     private readonly IEventBus _eventBus;
     private readonly IAgentManifestParser _manifestParser;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly RunStateMachine _stateMachine;
     private readonly ILogger _logger;
     private readonly string _workspacePath;
 
@@ -38,6 +39,7 @@ public class ContainerOrchestrator : IContainerOrchestrator
         IEventBus eventBus,
         IAgentManifestParser manifestParser,
         IServiceScopeFactory scopeFactory,
+        RunStateMachine stateMachine,
         ILogger logger,
         IConfiguration config)
     {
@@ -46,6 +48,7 @@ public class ContainerOrchestrator : IContainerOrchestrator
         _eventBus = eventBus;
         _manifestParser = manifestParser;
         _scopeFactory = scopeFactory;
+        _stateMachine = stateMachine;
         _logger = logger;
         _workspacePath = config["Docker:WorkspacePath"] ?? "/var/agenthost/runs";
     }
@@ -171,9 +174,8 @@ public class ContainerOrchestrator : IContainerOrchestrator
             _logger.Information("Container {ContainerId} started for run {RunId}",
                 containerResponse.ID, run.Id);
 
-            run.Status = RunStatus.Running;
             run.StartedAt = DateTime.UtcNow;
-            await _runRepository.UpdateAsync(run, ct);
+            await _stateMachine.TransitionAsync(run, RunStatus.Running, "container started", ct);
 
             // Monitor in the background using a fresh DI scope: the caller's HTTP request
             // scope (and its scoped repositories/DbConnections) may be disposed long before
@@ -186,10 +188,11 @@ public class ContainerOrchestrator : IContainerOrchestrator
         {
             _logger.Error(ex, "Failed to launch agent for run {RunId}", run.Id);
 
-            run.Status = RunStatus.Failed;
             run.ErrorCode = "launch_failed";
             run.ErrorMessage = ex.Message;
-            await _runRepository.UpdateAsync(run, ct);
+            // InfraError (not Failed) because this can happen while run.Status is still
+            // Preparing, and Failed is only a valid transition from Finalizing (spec 8.2).
+            await _stateMachine.TransitionAsync(run, RunStatus.InfraError, "launch failed", ct);
 
             throw;
         }
@@ -200,6 +203,7 @@ public class ContainerOrchestrator : IContainerOrchestrator
         using var scope = _scopeFactory.CreateScope();
         var runRepository = scope.ServiceProvider.GetRequiredService<IRunRepository>();
         var eventBus = scope.ServiceProvider.GetRequiredService<IEventBus>();
+        var stateMachine = scope.ServiceProvider.GetRequiredService<RunStateMachine>();
 
         try
         {
@@ -248,7 +252,6 @@ public class ContainerOrchestrator : IContainerOrchestrator
                 return;
             }
 
-            run.Status = exitCode.StatusCode == 0 ? RunStatus.Succeeded : RunStatus.Failed;
             run.ExitCode = (int)exitCode.StatusCode;
             run.FinishedAt = DateTime.UtcNow;
             run.DurationMs = (long)(run.FinishedAt.Value - startedAt).TotalMilliseconds;
@@ -258,7 +261,10 @@ public class ContainerOrchestrator : IContainerOrchestrator
                 run.ErrorMessage = $"Container exited with code {exitCode.StatusCode}";
             }
 
-            await runRepository.UpdateAsync(run, CancellationToken.None);
+            // Succeeded/Failed are only valid transitions from Finalizing (spec 8.2).
+            await stateMachine.TransitionAsync(run, RunStatus.Finalizing, "container exited", CancellationToken.None);
+            await stateMachine.TransitionAsync(
+                run, exitCode.StatusCode == 0 ? RunStatus.Succeeded : RunStatus.Failed, "container exited", CancellationToken.None);
 
             await eventBus.PublishAsync(new RunEvent
             {
@@ -274,12 +280,11 @@ public class ContainerOrchestrator : IContainerOrchestrator
             _logger.Error(ex, "Error monitoring container {ContainerId}", containerId);
 
             var run = await runRepository.GetAsync(runId, CancellationToken.None);
-            if (run is not null)
+            if (run is not null && !run.Status.IsTerminal())
             {
-                run.Status = RunStatus.InfraError;
                 run.ErrorCode = "monitoring_error";
                 run.ErrorMessage = ex.Message;
-                await runRepository.UpdateAsync(run, CancellationToken.None);
+                await stateMachine.TransitionAsync(run, RunStatus.InfraError, "monitoring error", CancellationToken.None);
             }
         }
     }

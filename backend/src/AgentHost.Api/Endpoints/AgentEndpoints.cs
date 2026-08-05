@@ -15,6 +15,10 @@ public static class AgentEndpoints
         agentsApi.MapGet("/{id}", GetAgent).WithName("GetAgent");
         agentsApi.MapPost("/", CreateAgent).WithName("CreateAgent").WithValidation<CreateAgentRequest>()
             .RequireAuthorization(AuthorizationPolicies.Developer);
+        agentsApi.MapPut("/{id}", UpdateAgent).WithName("UpdateAgent")
+            .RequireAuthorization(AuthorizationPolicies.Developer);
+        agentsApi.MapDelete("/{id}", DeleteAgent).WithName("DeleteAgent")
+            .RequireAuthorization(AuthorizationPolicies.Developer);
 
         return app;
     }
@@ -48,5 +52,17 @@ public static class AgentEndpoints
         {
             return Results.UnprocessableEntity(new { error = ex.Message });
         }
+    }
+
+    private static async Task<IResult> UpdateAgent(string id, UpdateAgentRequest req, IAgentService agentService, CancellationToken ct)
+    {
+        var agent = await agentService.UpdateAsync(id, req, ct);
+        return agent != null ? Results.Ok(agent) : Results.NotFound();
+    }
+
+    private static async Task<IResult> DeleteAgent(string id, IAgentService agentService, CancellationToken ct)
+    {
+        var deleted = await agentService.DeleteAsync(id, ct);
+        return deleted ? Results.NoContent() : Results.NotFound();
     }
 }

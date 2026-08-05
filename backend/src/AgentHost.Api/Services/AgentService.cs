@@ -15,6 +15,8 @@ public interface IAgentService
     Task<List<Agent>> ListAsync(CancellationToken ct = default);
     Task<List<Agent>> ListByProjectAsync(string projectId, CancellationToken ct = default);
     Task<Agent> CreateAsync(CreateAgentRequest req, CancellationToken ct = default);
+    Task<Agent?> UpdateAsync(string id, UpdateAgentRequest req, CancellationToken ct = default);
+    Task<bool> DeleteAsync(string id, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -104,6 +106,27 @@ public class AgentService : IAgentService
         _logger.Information("Created agent {AgentId} ({Slug}) with initial version {VersionId}", agent.Id, agent.Slug, version.Id);
 
         return agent;
+    }
+
+    public async Task<Agent?> UpdateAsync(string id, UpdateAgentRequest req, CancellationToken ct = default)
+    {
+        var agent = await _agentRepository.GetAsync(id, ct);
+        if (agent is null) return null;
+
+        if (req.Name is not null) agent.Name = req.Name;
+        agent.UpdatedAt = DateTime.UtcNow;
+
+        await _agentRepository.UpdateAsync(agent, ct);
+        return agent;
+    }
+
+    public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
+    {
+        var agent = await _agentRepository.GetAsync(id, ct);
+        if (agent is null) return false;
+
+        await _agentRepository.SoftDeleteAsync(id, ct);
+        return true;
     }
 
     private static AgentType ParseAgentType(string type) => type switch
