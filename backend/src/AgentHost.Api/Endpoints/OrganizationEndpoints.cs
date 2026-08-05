@@ -2,6 +2,7 @@ using AgentHost.Api.Contracts;
 using AgentHost.Api.Domain;
 using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Repositories;
+using AgentHost.Api.Services;
 using AgentHost.Api.Validation;
 
 namespace AgentHost.Api.Endpoints;
@@ -15,7 +16,9 @@ public static class OrganizationEndpoints
         orgsApi.MapGet("/", ListOrganizations).WithName("ListOrganizations");
         orgsApi.MapGet("/{id}", GetOrganization).WithName("GetOrganization");
         // Normal signup goes through POST /api/auth/register (creates org + owner together);
-        // this endpoint is for an existing owner provisioning an additional organization.
+        // this endpoint is for an existing owner provisioning an additional organization. The new
+        // org is not readable through this API until someone authenticates *into* it, since every
+        // read below is scoped to the caller's own org.
         orgsApi.MapPost("/", CreateOrganization).WithName("CreateOrganization").WithValidation<CreateOrganizationRequest>()
             .RequireAuthorization(AuthorizationPolicies.Owner);
         orgsApi.MapPut("/{id}", UpdateOrganization).WithName("UpdateOrganization")
@@ -26,20 +29,32 @@ public static class OrganizationEndpoints
         return app;
     }
 
-    private static async Task<IResult> ListOrganizations(IOrganizationRepository repository, CancellationToken ct)
+    /// <summary>
+    /// Returns only the caller's own organization. This used to return every organization in the
+    /// system — a full tenant roster handed to any authenticated user.
+    /// </summary>
+    private static async Task<IResult> ListOrganizations(
+        IOrganizationRepository repository, ICallerContext caller, CancellationToken ct)
     {
-        var orgs = await repository.ListAsync(ct);
-        return Results.Ok(orgs);
+        var org = await repository.GetAsync(caller.OrgId, ct);
+        return Results.Ok(org is null ? new List<Organization>() : new List<Organization> { org });
     }
 
-    private static async Task<IResult> GetOrganization(string id, IOrganizationRepository repository, CancellationToken ct)
+    private static async Task<IResult> GetOrganization(
+        string id, IOrganizationRepository repository, ICallerContext caller, CancellationToken ct)
     {
+        if (!caller.BelongsToCallerOrg(id)) return Results.NotFound();
+
         var org = await repository.GetAsync(id, ct);
         return org != null ? Results.Ok(org) : Results.NotFound();
     }
 
-    private static async Task<IResult> CreateOrganization(CreateOrganizationRequest req, IOrganizationRepository repository, CancellationToken ct)
+    private static async Task<IResult> CreateOrganization(
+        CreateOrganizationRequest req, IOrganizationRepository repository, ICallerContext caller, CancellationToken ct)
     {
+        if (await repository.GetBySlugAsync(req.Slug, ct) is not null)
+            return Results.Conflict(new { error = $"Organization slug '{req.Slug}' is already taken" });
+
         var now = DateTime.UtcNow;
         var org = new Organization
         {
@@ -55,8 +70,11 @@ public static class OrganizationEndpoints
         return Results.Created($"/api/organizations/{org.Id}", org);
     }
 
-    private static async Task<IResult> UpdateOrganization(string id, UpdateOrganizationRequest req, IOrganizationRepository repository, CancellationToken ct)
+    private static async Task<IResult> UpdateOrganization(
+        string id, UpdateOrganizationRequest req, IOrganizationRepository repository, ICallerContext caller, CancellationToken ct)
     {
+        if (!caller.BelongsToCallerOrg(id)) return Results.NotFound();
+
         var org = await repository.GetAsync(id, ct);
         if (org is null) return Results.NotFound();
 
@@ -68,12 +86,22 @@ public static class OrganizationEndpoints
         return Results.Ok(org);
     }
 
-    private static async Task<IResult> DeleteOrganization(string id, IOrganizationRepository repository, CancellationToken ct)
+    /// <summary>
+    /// Soft-deletes the organization and cascades to its projects, agents, runs, secrets and users
+    /// in a single transaction. Deleting only the org row left every child live and readable.
+    /// </summary>
+    private static async Task<IResult> DeleteOrganization(
+        string id, IOrganizationRepository repository, IAuditService auditService, ICallerContext caller, CancellationToken ct)
     {
+        if (!caller.BelongsToCallerOrg(id)) return Results.NotFound();
+
         var org = await repository.GetAsync(id, ct);
         if (org is null) return Results.NotFound();
 
-        await repository.SoftDeleteAsync(id, ct);
+        // Audit first: the cascade is what we want on the record, and audit_log rows outlive the
+        // org by design (WORM retention).
+        await auditService.RecordAsync(id, "organization.deleted", caller.UserId, "organization", id, ct: ct);
+        await repository.SoftDeleteCascadeAsync(id, ct);
         return Results.NoContent();
     }
 }

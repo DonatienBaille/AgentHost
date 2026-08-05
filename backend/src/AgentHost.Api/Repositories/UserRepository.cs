@@ -7,12 +7,17 @@ namespace AgentHost.Api.Repositories;
 
 public interface IUserRepository
 {
+    /// <summary>Unscoped lookup — only for resolving the *caller's own* identity (GET /api/auth/me).</summary>
     Task<User?> GetAsync(string id, CancellationToken ct = default);
+
+    /// <summary>Org-scoped lookup: returns null (=&gt; 404, never 403) for another tenant's user.</summary>
+    Task<User?> GetAsync(string id, string orgId, CancellationToken ct = default);
+
     Task<User?> GetByEmailAsync(string email, CancellationToken ct = default);
     Task<List<User>> ListByOrgAsync(string orgId, CancellationToken ct = default);
     Task InsertAsync(User user, CancellationToken ct = default);
     Task UpdateAsync(User user, CancellationToken ct = default);
-    Task SoftDeleteAsync(string id, CancellationToken ct = default);
+    Task SoftDeleteAsync(string id, string orgId, CancellationToken ct = default);
 }
 
 public class UserRepository : IUserRepository
@@ -36,6 +41,13 @@ public class UserRepository : IUserRepository
         var sql = $"SELECT {SelectColumns} FROM users WHERE id = @Id AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
         return await db.QueryFirstOrDefaultAsync<User>(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+    }
+
+    public async Task<User?> GetAsync(string id, string orgId, CancellationToken ct = default)
+    {
+        var sql = $"SELECT {SelectColumns} FROM users WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL";
+        using var db = _connectionFactory.CreateConnection();
+        return await db.QueryFirstOrDefaultAsync<User>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
     }
 
     public async Task<User?> GetByEmailAsync(string email, CancellationToken ct = default)
@@ -77,11 +89,11 @@ public class UserRepository : IUserRepository
         _logger.Information("Updated user {UserId}", user.Id);
     }
 
-    public async Task SoftDeleteAsync(string id, CancellationToken ct = default)
+    public async Task SoftDeleteAsync(string id, string orgId, CancellationToken ct = default)
     {
-        const string sql = "UPDATE users SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id";
+        const string sql = "UPDATE users SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id AND org_id = @OrgId";
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
         _logger.Information("Soft-deleted user {UserId}", id);
     }
 }

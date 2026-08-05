@@ -6,13 +6,20 @@ using Serilog;
 
 namespace AgentHost.Api.Services;
 
+/// <summary>
+/// Every method here takes the *caller's* organization id, sourced from the JWT by the endpoint
+/// layer (ICallerContext.OrgId) and never from the request. Lookups that miss return null so the
+/// endpoint answers 404 — a 403 would confirm that some other tenant owns that ULID.
+/// </summary>
 public interface IProjectService
 {
-    Task<Project?> GetAsync(string id, CancellationToken ct = default);
-    Task<List<Project>> ListAsync(CancellationToken ct = default);
+    Task<Project?> GetAsync(string id, string orgId, CancellationToken ct = default);
     Task<List<Project>> ListByOrgAsync(string orgId, CancellationToken ct = default);
-    Task<Project> CreateAsync(CreateProjectRequest req, CancellationToken ct = default);
-    Task<Project?> UpdateAsync(string id, UpdateProjectRequest req, CancellationToken ct = default);
+    Task<Project> CreateAsync(CreateProjectRequest req, string orgId, CancellationToken ct = default);
+    Task<Project?> UpdateAsync(string id, string orgId, UpdateProjectRequest req, CancellationToken ct = default);
+
+    /// <summary>Soft-deletes the project and cascades to its agents, runs, project secrets and webhooks.</summary>
+    Task<bool> DeleteAsync(string id, string orgId, CancellationToken ct = default);
 }
 
 public class ProjectService : IProjectService
@@ -26,20 +33,19 @@ public class ProjectService : IProjectService
         _logger = logger;
     }
 
-    public Task<Project?> GetAsync(string id, CancellationToken ct = default) => _projectRepository.GetAsync(id, ct);
-
-    public Task<List<Project>> ListAsync(CancellationToken ct = default) => _projectRepository.ListAsync(ct);
+    public Task<Project?> GetAsync(string id, string orgId, CancellationToken ct = default) =>
+        _projectRepository.GetAsync(id, orgId, ct);
 
     public Task<List<Project>> ListByOrgAsync(string orgId, CancellationToken ct = default) =>
         _projectRepository.ListByOrgAsync(orgId, ct);
 
-    public async Task<Project> CreateAsync(CreateProjectRequest req, CancellationToken ct = default)
+    public async Task<Project> CreateAsync(CreateProjectRequest req, string orgId, CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
         var project = new Project
         {
             Id = UlidGenerator.NewUlid(),
-            OrgId = req.OrgId,
+            OrgId = orgId,
             Name = req.Name,
             Slug = req.Slug,
             Description = req.Description,
@@ -49,13 +55,13 @@ public class ProjectService : IProjectService
         };
 
         await _projectRepository.InsertAsync(project, ct);
-        _logger.Information("Created project {ProjectId} ({Slug})", project.Id, project.Slug);
+        _logger.Information("Created project {ProjectId} ({Slug}) in org {OrgId}", project.Id, project.Slug, orgId);
         return project;
     }
 
-    public async Task<Project?> UpdateAsync(string id, UpdateProjectRequest req, CancellationToken ct = default)
+    public async Task<Project?> UpdateAsync(string id, string orgId, UpdateProjectRequest req, CancellationToken ct = default)
     {
-        var project = await _projectRepository.GetAsync(id, ct);
+        var project = await _projectRepository.GetAsync(id, orgId, ct);
         if (project is null) return null;
 
         if (req.Name is not null) project.Name = req.Name;
@@ -65,5 +71,14 @@ public class ProjectService : IProjectService
 
         await _projectRepository.UpdateAsync(project, ct);
         return project;
+    }
+
+    public async Task<bool> DeleteAsync(string id, string orgId, CancellationToken ct = default)
+    {
+        var project = await _projectRepository.GetAsync(id, orgId, ct);
+        if (project is null) return false;
+
+        await _projectRepository.SoftDeleteCascadeAsync(id, orgId, ct);
+        return true;
     }
 }

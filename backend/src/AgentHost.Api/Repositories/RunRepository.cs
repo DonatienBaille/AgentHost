@@ -7,9 +7,18 @@ namespace AgentHost.Api.Repositories;
 
 public interface IRunRepository
 {
+    /// <summary>
+    /// Unscoped lookup — for background/system callers only (the run executor has no HTTP caller
+    /// and therefore no org to scope by). Request handlers must use the
+    /// <see cref="GetAsync(string, string, CancellationToken)"/> overload so tenant isolation is
+    /// enforced by the SQL rather than by a check someone can forget to write.
+    /// </summary>
     Task<Run?> GetAsync(string id, CancellationToken ct = default);
-    Task<List<Run>> ListAsync(int skip, int take, CancellationToken ct = default);
-    Task<List<Run>> ListByProjectAsync(string projectId, int skip = 0, int take = 50, CancellationToken ct = default);
+
+    /// <summary>Org-scoped lookup: returns null (=&gt; 404, never 403) for another tenant's run.</summary>
+    Task<Run?> GetAsync(string id, string orgId, CancellationToken ct = default);
+
+    Task<List<Run>> ListByProjectAsync(string projectId, string orgId, int skip = 0, int take = 50, CancellationToken ct = default);
     Task<List<Run>> ListByOrgAsync(string orgId, int skip = 0, int take = 50, CancellationToken ct = default);
     Task InsertAsync(Run run, CancellationToken ct = default);
     Task UpdateAsync(Run run, CancellationToken ct = default);
@@ -44,30 +53,27 @@ public class RunRepository : IRunRepository
         return await db.QueryFirstOrDefaultAsync<Run>(command);
     }
 
-    public async Task<List<Run>> ListAsync(int skip, int take, CancellationToken ct = default)
+    public async Task<Run?> GetAsync(string id, string orgId, CancellationToken ct = default)
     {
-        var sql = $"""
-            SELECT {SelectColumns} FROM runs
-            WHERE deleted_at IS NULL
-            ORDER BY created_at DESC
-            LIMIT @Take OFFSET @Skip
-            """;
+        var sql = $"SELECT {SelectColumns} FROM runs WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        var command = new CommandDefinition(sql, new { Skip = skip, Take = take }, cancellationToken: ct);
-        var runs = await db.QueryAsync<Run>(command);
-        return runs.ToList();
+        var command = new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct);
+        return await db.QueryFirstOrDefaultAsync<Run>(command);
     }
 
-    public async Task<List<Run>> ListByProjectAsync(string projectId, int skip = 0, int take = 50, CancellationToken ct = default)
+    public async Task<List<Run>> ListByProjectAsync(string projectId, string orgId, int skip = 0, int take = 50, CancellationToken ct = default)
     {
         var sql = $"""
             SELECT {SelectColumns} FROM runs
-            WHERE project_id = @ProjectId AND deleted_at IS NULL
+            WHERE project_id = @ProjectId AND org_id = @OrgId AND deleted_at IS NULL
             ORDER BY created_at DESC
             LIMIT @Take OFFSET @Skip
             """;
         using var db = _connectionFactory.CreateConnection();
-        var command = new CommandDefinition(sql, new { ProjectId = projectId, Skip = skip, Take = take }, cancellationToken: ct);
+        var command = new CommandDefinition(
+            sql,
+            new { ProjectId = projectId, OrgId = orgId, Skip = Paging.ClampSkip(skip), Take = Paging.ClampTake(take) },
+            cancellationToken: ct);
         var runs = await db.QueryAsync<Run>(command);
         return runs.ToList();
     }
@@ -81,7 +87,10 @@ public class RunRepository : IRunRepository
             LIMIT @Take OFFSET @Skip
             """;
         using var db = _connectionFactory.CreateConnection();
-        var command = new CommandDefinition(sql, new { OrgId = orgId, Skip = skip, Take = take }, cancellationToken: ct);
+        var command = new CommandDefinition(
+            sql,
+            new { OrgId = orgId, Skip = Paging.ClampSkip(skip), Take = Paging.ClampTake(take) },
+            cancellationToken: ct);
         var runs = await db.QueryAsync<Run>(command);
         return runs.ToList();
     }

@@ -7,13 +7,21 @@ namespace AgentHost.Api.Repositories;
 
 public interface IAgentRepository
 {
+    /// <summary>
+    /// Unscoped lookup — for background/system callers only (e.g. the run executor resolving the
+    /// agent of an already-authorized run). Request handlers must use the org-scoped overload.
+    /// </summary>
     Task<Agent?> GetAsync(string id, CancellationToken ct = default);
+
+    /// <summary>Org-scoped lookup: returns null (=&gt; 404, never 403) for another tenant's agent.</summary>
+    Task<Agent?> GetAsync(string id, string orgId, CancellationToken ct = default);
+
     Task<Agent?> GetBySlugAsync(string orgId, string slug, CancellationToken ct = default);
-    Task<List<Agent>> ListAsync(CancellationToken ct = default);
-    Task<List<Agent>> ListByProjectAsync(string projectId, CancellationToken ct = default);
+    Task<List<Agent>> ListByOrgAsync(string orgId, CancellationToken ct = default);
+    Task<List<Agent>> ListByProjectAsync(string projectId, string orgId, CancellationToken ct = default);
     Task InsertAsync(Agent agent, CancellationToken ct = default);
     Task UpdateAsync(Agent agent, CancellationToken ct = default);
-    Task SoftDeleteAsync(string id, CancellationToken ct = default);
+    Task SoftDeleteAsync(string id, string orgId, CancellationToken ct = default);
 }
 
 public class AgentRepository : IAgentRepository
@@ -47,19 +55,30 @@ public class AgentRepository : IAgentRepository
         return await db.QueryFirstOrDefaultAsync<Agent>(new CommandDefinition(sql, new { OrgId = orgId, Slug = slug }, cancellationToken: ct));
     }
 
-    public async Task<List<Agent>> ListAsync(CancellationToken ct = default)
+    public async Task<Agent?> GetAsync(string id, string orgId, CancellationToken ct = default)
     {
-        var sql = $"SELECT {SelectColumns} FROM agents WHERE deleted_at IS NULL ORDER BY created_at DESC";
+        var sql = $"SELECT {SelectColumns} FROM agents WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<Agent>(new CommandDefinition(sql, cancellationToken: ct));
+        return await db.QueryFirstOrDefaultAsync<Agent>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+    }
+
+    public async Task<List<Agent>> ListByOrgAsync(string orgId, CancellationToken ct = default)
+    {
+        var sql = $"SELECT {SelectColumns} FROM agents WHERE org_id = @OrgId AND deleted_at IS NULL ORDER BY created_at DESC";
+        using var db = _connectionFactory.CreateConnection();
+        var rows = await db.QueryAsync<Agent>(new CommandDefinition(sql, new { OrgId = orgId }, cancellationToken: ct));
         return rows.ToList();
     }
 
-    public async Task<List<Agent>> ListByProjectAsync(string projectId, CancellationToken ct = default)
+    public async Task<List<Agent>> ListByProjectAsync(string projectId, string orgId, CancellationToken ct = default)
     {
-        var sql = $"SELECT {SelectColumns} FROM agents WHERE project_id = @ProjectId AND deleted_at IS NULL ORDER BY created_at DESC";
+        var sql = $"""
+            SELECT {SelectColumns} FROM agents
+            WHERE project_id = @ProjectId AND org_id = @OrgId AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            """;
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<Agent>(new CommandDefinition(sql, new { ProjectId = projectId }, cancellationToken: ct));
+        var rows = await db.QueryAsync<Agent>(new CommandDefinition(sql, new { ProjectId = projectId, OrgId = orgId }, cancellationToken: ct));
         return rows.ToList();
     }
 
@@ -102,11 +121,11 @@ public class AgentRepository : IAgentRepository
         _logger.Information("Updated agent {AgentId}", agent.Id);
     }
 
-    public async Task SoftDeleteAsync(string id, CancellationToken ct = default)
+    public async Task SoftDeleteAsync(string id, string orgId, CancellationToken ct = default)
     {
-        const string sql = "UPDATE agents SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id";
+        const string sql = "UPDATE agents SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id AND org_id = @OrgId";
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
         _logger.Information("Soft-deleted agent {AgentId}", id);
     }
 }

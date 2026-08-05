@@ -74,7 +74,7 @@ public class WebhookEndpointsTests
         var suffix = TestData.Suffix();
         var (ownerClient, owner, project, _) = await TestData.CreateFullFixtureAsync(_factory, suffix);
 
-        var (developerToken, _) = await TestData.CreateUserWithRoleAsync(ownerClient, owner.User.OrgId, UserRole.Developer, suffix);
+        var (developerToken, _) = await TestData.CreateUserWithRoleAsync(ownerClient, UserRole.Developer, suffix);
         var developerClient = TestData.AuthedClient(_factory, developerToken);
 
         var req = new CreateWebhookRequest

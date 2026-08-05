@@ -26,7 +26,7 @@ public class AuthorizationTests
         var owner = await TestData.RegisterAsync(bootstrap, suffix);
         var ownerClient = TestData.AuthedClient(_factory, owner.Token);
 
-        var (maintainerToken, _) = await TestData.CreateUserWithRoleAsync(ownerClient, owner.User.OrgId, UserRole.Maintainer, suffix);
+        var (maintainerToken, _) = await TestData.CreateUserWithRoleAsync(ownerClient, UserRole.Maintainer, suffix);
         var maintainerClient = TestData.AuthedClient(_factory, maintainerToken);
 
         var anonClient = _factory.CreateClient();
@@ -59,14 +59,15 @@ public class AuthorizationTests
         var owner = await TestData.RegisterAsync(bootstrap, suffix);
         var ownerClient = TestData.AuthedClient(_factory, owner.Token);
 
-        var (developerToken, _) = await TestData.CreateUserWithRoleAsync(ownerClient, owner.User.OrgId, UserRole.Developer, suffix);
+        var (developerToken, _) = await TestData.CreateUserWithRoleAsync(ownerClient, UserRole.Developer, suffix);
         var developerClient = TestData.AuthedClient(_factory, developerToken);
 
         var anonClient = _factory.CreateClient();
 
+        // CreateUserRequest no longer carries an OrgId: the new user always lands in the
+        // calling client's own organization.
         CreateUserRequest NewUserReq(string tag) => new()
         {
-            OrgId = owner.User.OrgId,
             Email = $"rbac-{tag}-{suffix}@example.com",
             Password = TestData.DefaultPassword,
             Role = UserRole.Viewer,
@@ -91,7 +92,7 @@ public class AuthorizationTests
         var suffix = TestData.Suffix();
         var (ownerClient, owner, _, agent) = await TestData.CreateFullFixtureAsync(_factory, suffix);
 
-        var (viewerToken, _) = await TestData.CreateUserWithRoleAsync(ownerClient, owner.User.OrgId, UserRole.Viewer, suffix);
+        var (viewerToken, _) = await TestData.CreateUserWithRoleAsync(ownerClient, UserRole.Viewer, suffix);
         var viewerClient = TestData.AuthedClient(_factory, viewerToken);
 
         var anonClient = _factory.CreateClient();

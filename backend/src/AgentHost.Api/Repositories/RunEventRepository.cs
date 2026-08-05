@@ -9,7 +9,18 @@ public interface IRunEventRepository
 {
     /// <summary>Inserts the event, atomically assigning the next `seq` for its run.</summary>
     Task<long> InsertAsync(RunEvent evt, CancellationToken ct = default);
+
+    /// <summary>
+    /// Unscoped listing for callers that have already authorized access to the run. Always
+    /// bounded — an unbounded event fetch on a chatty run is a memory hazard even internally.
+    /// </summary>
     Task<List<RunEvent>> ListByRunAsync(string runId, long fromSeq = 0, CancellationToken ct = default);
+
+    /// <summary>
+    /// Org-scoped listing (run_events has no org_id; joins through run_events.run_id -&gt;
+    /// runs.org_id). Returns an empty list for another tenant's run.
+    /// </summary>
+    Task<List<RunEvent>> ListByRunAsync(string runId, string orgId, long fromSeq, int take, CancellationToken ct = default);
 }
 
 public class RunEventRepository : IRunEventRepository
@@ -75,12 +86,36 @@ public class RunEventRepository : IRunEventRepository
             FROM run_events
             WHERE run_id = @RunId AND seq >= @FromSeq
             ORDER BY seq ASC
+            LIMIT @Take
             """;
 
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<RunEventRow>(new CommandDefinition(sql, new { RunId = runId, FromSeq = fromSeq }, cancellationToken: ct));
+        var rows = await db.QueryAsync<RunEventRow>(new CommandDefinition(
+            sql, new { RunId = runId, FromSeq = fromSeq, Take = Paging.MaxTake }, cancellationToken: ct));
+        return Materialize(rows);
+    }
 
-        return rows.Select(r => new RunEvent
+    public async Task<List<RunEvent>> ListByRunAsync(string runId, string orgId, long fromSeq, int take, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT e.run_id, e.seq, e.timestamp, e.event_type, e.level, e.message, e.payload
+            FROM run_events e
+            JOIN runs r ON r.id = e.run_id
+            WHERE e.run_id = @RunId AND r.org_id = @OrgId AND r.deleted_at IS NULL AND e.seq >= @FromSeq
+            ORDER BY e.seq ASC
+            LIMIT @Take
+            """;
+
+        using var db = _connectionFactory.CreateConnection();
+        var rows = await db.QueryAsync<RunEventRow>(new CommandDefinition(
+            sql,
+            new { RunId = runId, OrgId = orgId, FromSeq = fromSeq < 0 ? 0 : fromSeq, Take = Paging.ClampTake(take) },
+            cancellationToken: ct));
+        return Materialize(rows);
+    }
+
+    private static List<RunEvent> Materialize(IEnumerable<RunEventRow> rows) =>
+        rows.Select(r => new RunEvent
         {
             RunId = r.RunId,
             Seq = r.Seq,
@@ -92,7 +127,6 @@ public class RunEventRepository : IRunEventRepository
                 ? null
                 : System.Text.Json.Nodes.JsonNode.Parse(r.Payload),
         }).ToList();
-    }
 
     private static long HashRunId(string runId)
     {

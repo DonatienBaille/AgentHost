@@ -50,7 +50,10 @@ public class AuditLogRepository : IAuditLogRepository
             LIMIT @Take OFFSET @Skip
             """;
         using var db = _connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<AuditLogEntry>(new CommandDefinition(sql, new { OrgId = orgId, Skip = skip, Take = take }, cancellationToken: ct));
+        var rows = await db.QueryAsync<AuditLogEntry>(new CommandDefinition(
+            sql,
+            new { OrgId = orgId, Skip = Paging.ClampSkip(skip), Take = Paging.ClampTake(take) },
+            cancellationToken: ct));
         return rows.ToList();
     }
 

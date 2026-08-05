@@ -2,7 +2,7 @@ namespace AgentHost.Api.Contracts;
 
 public class CreateAgentRequest
 {
-    public string OrgId { get; set; } = string.Empty;
+    // No OrgId: derived from the caller's JWT, and the ProjectId below is verified to belong to it.
     public string ProjectId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Slug { get; set; } = string.Empty;

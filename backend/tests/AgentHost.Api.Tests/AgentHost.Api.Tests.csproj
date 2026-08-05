@@ -21,4 +21,10 @@
     <ProjectReference Include="../../src/AgentHost.Api/AgentHost.Api.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Needed so the test host can reconfigure ASP.NET Core services (e.g. RateLimiterOptions in
+         AgentHostApiFactory) rather than only consume the API project's own types. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>

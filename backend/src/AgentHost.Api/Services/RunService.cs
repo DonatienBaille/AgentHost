@@ -35,6 +35,7 @@ public class RunService : IRunService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAuditService _auditService;
     private readonly IWebhookDispatcher _webhookDispatcher;
+    private readonly ICallerContext _callerContext;
     private readonly ILogger _logger;
 
     public RunService(
@@ -50,6 +51,7 @@ public class RunService : IRunService
         IServiceScopeFactory scopeFactory,
         IAuditService auditService,
         IWebhookDispatcher webhookDispatcher,
+        ICallerContext callerContext,
         ILogger logger)
     {
         _runRepository = runRepository;
@@ -64,8 +66,19 @@ public class RunService : IRunService
         _scopeFactory = scopeFactory;
         _auditService = auditService;
         _webhookDispatcher = webhookDispatcher;
+        _callerContext = callerContext;
         _logger = logger;
     }
+
+    /// <summary>
+    /// The acting user, taken from the JWT — never from the request body. Null when there is no
+    /// HTTP caller on the ambient scope (SignalR hub invocations, background work): those paths
+    /// authorize the run against Context.User themselves before calling in.
+    /// </summary>
+    private string? CallerUserId => _callerContext.IsAuthenticated ? _callerContext.UserId : null;
+
+    /// <summary>The caller's organization, for the list methods below. Requires an HTTP caller.</summary>
+    private string CallerOrgId => _callerContext.OrgId;
 
     public async Task<Run> CreateAsync(CreateRunRequest req, CancellationToken ct = default)
     {
@@ -101,7 +114,7 @@ public class RunService : IRunService
             Context = req.Context ?? new JsonObject(),
             BudgetMaxUsd = req.BudgetMaxUsd ?? manifest.Spec.Budget.DefaultMaxUsd,
             BudgetUsedUsd = 0m,
-            TriggeredByUserId = req.TriggeredByUserId,
+            TriggeredByUserId = CallerUserId,
             TriggeredByType = req.TriggeredByType,
             ParentRunId = req.ParentRunId,
             RootRunId = req.ParentRunId, // simplification: root = immediate parent unless chained further
@@ -128,7 +141,7 @@ public class RunService : IRunService
         }, ct);
 
         await _auditService.RecordAsync(
-            project.OrgId, "run.created", req.TriggeredByUserId, "run", run.Id, ct: ct);
+            project.OrgId, "run.created", CallerUserId, "run", run.Id, ct: ct);
 
         await _webhookDispatcher.DispatchAsync(run.ProjectId, "run.created", new
         {
@@ -207,10 +220,10 @@ public class RunService : IRunService
     public Task<Run?> GetAsync(string id, CancellationToken ct = default) => _runRepository.GetAsync(id, ct);
 
     public Task<List<Run>> ListAsync(int skip, int take, CancellationToken ct = default) =>
-        _runRepository.ListAsync(skip, take, ct);
+        _runRepository.ListByOrgAsync(CallerOrgId, skip, take, ct);
 
     public Task<List<Run>> ListByProjectAsync(string projectId, int skip = 0, int take = 50, CancellationToken ct = default) =>
-        _runRepository.ListByProjectAsync(projectId, skip, take, ct);
+        _runRepository.ListByProjectAsync(projectId, CallerOrgId, skip, take, ct);
 
     public async Task<bool> ApproveAsync(string runId, ApprovalRequest req, CancellationToken ct = default)
     {
@@ -226,7 +239,7 @@ public class RunService : IRunService
         {
             approval.Responses.Add(new ApprovalResponse
             {
-                By = req.DecidedByUserId ?? "unknown",
+                By = CallerUserId ?? "unknown",
                 Decision = decision,
                 At = DateTime.UtcNow,
                 Note = req.Note,
@@ -236,13 +249,13 @@ public class RunService : IRunService
             {
                 approval.Status = ApprovalStatus.Rejected;
                 approval.DecidedAt = DateTime.UtcNow;
-                approval.DecidedBy = req.DecidedByUserId;
+                approval.DecidedBy = CallerUserId;
             }
             else if (approval.Responses.Count >= approval.RequiredCount)
             {
                 approval.Status = ApprovalStatus.Approved;
                 approval.DecidedAt = DateTime.UtcNow;
-                approval.DecidedBy = req.DecidedByUserId;
+                approval.DecidedBy = CallerUserId;
             }
 
             await _approvalRepository.UpdateAsync(approval, ct);

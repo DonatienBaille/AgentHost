@@ -15,17 +15,19 @@ namespace AgentHost.Api.Tests.Integration;
 /// and so actually reaches UseRateLimiter on every call.
 ///
 /// This intentionally does NOT share <see cref="IntegrationCollection"/>'s factory: it owns a
-/// private <see cref="AgentHostApiFactory"/> instance so tripping the limiter here can never
-/// cause spurious 429s in any other test class sharing the collection's rate limiter state.
+/// private <see cref="RateLimitedApiFactory"/> instance so tripping the limiter here can never
+/// cause spurious 429s in any other test class. That factory is also the only one that leaves the
+/// global limiter installed — the shared collection's host removes it, because under TestServer
+/// every request lands in the same partition and the suite as a whole would otherwise trip it.
 /// PermitLimit/Window are hardcoded literals in Program.cs (not configuration-driven), so a
 /// fixture-only override isn't available without changing production code; instead this fires
 /// enough concurrent requests to comfortably exceed 120 within the current one-minute window.
 /// </summary>
-public class RateLimitingTests : IClassFixture<AgentHostApiFactory>
+public class RateLimitingTests : IClassFixture<RateLimitedApiFactory>
 {
-    private readonly AgentHostApiFactory _factory;
+    private readonly RateLimitedApiFactory _factory;
 
-    public RateLimitingTests(AgentHostApiFactory factory) => _factory = factory;
+    public RateLimitingTests(RateLimitedApiFactory factory) => _factory = factory;
 
     [Fact]
     public async Task ExceedingPermitLimit_Eventually429s()
