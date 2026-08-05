@@ -20,7 +20,11 @@ public class RunStateMachineTests
         eventBus = new Mock<IEventBus>();
         eventBus.Setup(e => e.PublishAsync(It.IsAny<RunEvent>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-        return new RunStateMachine(runRepo.Object, eventBus.Object, Serilog.Log.Logger);
+        var webhookDispatcher = new Mock<IWebhookDispatcher>();
+        webhookDispatcher.Setup(w => w.DispatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        return new RunStateMachine(runRepo.Object, eventBus.Object, webhookDispatcher.Object, Serilog.Log.Logger);
     }
 
     private static Run NewRun(RunStatus status) => new()

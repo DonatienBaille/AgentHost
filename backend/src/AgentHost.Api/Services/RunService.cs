@@ -34,6 +34,7 @@ public class RunService : IRunService
     private readonly RunStateMachine _stateMachine;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAuditService _auditService;
+    private readonly IWebhookDispatcher _webhookDispatcher;
     private readonly ILogger _logger;
 
     public RunService(
@@ -48,6 +49,7 @@ public class RunService : IRunService
         RunStateMachine stateMachine,
         IServiceScopeFactory scopeFactory,
         IAuditService auditService,
+        IWebhookDispatcher webhookDispatcher,
         ILogger logger)
     {
         _runRepository = runRepository;
@@ -61,6 +63,7 @@ public class RunService : IRunService
         _stateMachine = stateMachine;
         _scopeFactory = scopeFactory;
         _auditService = auditService;
+        _webhookDispatcher = webhookDispatcher;
         _logger = logger;
     }
 
@@ -127,6 +130,14 @@ public class RunService : IRunService
         await _auditService.RecordAsync(
             project.OrgId, "run.created", req.TriggeredByUserId, "run", run.Id, ct: ct);
 
+        await _webhookDispatcher.DispatchAsync(run.ProjectId, "run.created", new
+        {
+            runId = run.Id,
+            projectId = run.ProjectId,
+            agentId = run.AgentId,
+            status = run.Status.ToDbString(),
+        }, ct);
+
         await _stateMachine.TransitionAsync(run, RunStatus.Queued, ct: ct);
 
         // Launch in the background via a fresh DI scope: the run can outlive the HTTP request
@@ -158,9 +169,10 @@ public class RunService : IRunService
         if (agent is null)
         {
             logger.Error("Agent {AgentId} not found while executing run {RunId}", run.AgentId, runId);
-            run.Status = RunStatus.InfraError;
             run.ErrorCode = "agent_not_found";
-            await runRepository.UpdateAsync(run, CancellationToken.None);
+            // Routed through the state machine (rather than a direct repository update) so the
+            // terminal-state webhook dispatch (run.infra_error / run.finished) still fires.
+            await stateMachine.TransitionAsync(run, RunStatus.InfraError, "agent not found", CancellationToken.None);
             return;
         }
 
@@ -181,10 +193,14 @@ public class RunService : IRunService
         {
             logger.Error(ex, "Failed to execute run {RunId}", run.Id);
 
-            run.Status = RunStatus.Failed;
             run.ErrorCode = "execution_error";
             run.ErrorMessage = ex.Message;
-            await runRepository.UpdateAsync(run, CancellationToken.None);
+            // RunStatus.Failed is only a valid transition from Finalizing (spec 8.2); this catch
+            // can fire earlier (e.g. during Provisioning/Preparing), so InfraError — valid from
+            // any non-terminal state — is the correct terminal status here. Routing through the
+            // state machine (rather than a direct repository update) also ensures the
+            // terminal-state webhook dispatch (run.infra_error / run.finished) fires.
+            await stateMachine.TransitionAsync(run, RunStatus.InfraError, ex.Message, CancellationToken.None);
         }
     }
 
