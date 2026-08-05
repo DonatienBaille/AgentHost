@@ -33,13 +33,34 @@ public static class PasswordPolicy
 
     public static bool IsCommon(string value) => CommonPasswords.Contains(value);
 
-    /// <summary>Applies the full policy to a password property on any validator.</summary>
-    public static IRuleBuilderOptions<T, string> Password<T>(this IRuleBuilder<T, string> rule) =>
-        rule.NotEmpty()
+    /// <summary>
+    /// Applies the full policy to a password property on any validator.
+    ///
+    /// Pass a <paramref name="breachedChecker"/> to additionally screen the password against the
+    /// configured breach corpus (Have I Been Pwned's k-anonymity range API — see
+    /// <see cref="Services.BreachedPasswordChecker"/>). That check is opt-in, off by default, and
+    /// fails open, so this rule is a no-op unless a deployment enables it and the service answers.
+    ///
+    /// Every place a password is set goes through here: registration, POST /api/users,
+    /// PUT /api/users/{id}, invitation acceptance, password-reset confirmation and password change.
+    /// </summary>
+    public static IRuleBuilderOptions<T, string> Password<T>(
+        this IRuleBuilder<T, string> rule, Services.IBreachedPasswordChecker? breachedChecker = null)
+    {
+        var builder = rule.NotEmpty()
             .MinimumLength(MinimumLength)
                 .WithMessage($"Password must be at least {MinimumLength} characters")
             .Must(p => !IsAllSameCharacter(p))
                 .WithMessage("Password must not be a single repeated character")
             .Must(p => !IsCommon(p))
                 .WithMessage("Password is too common; choose something less guessable");
+
+        if (breachedChecker is null)
+            return builder;
+
+        // Runs last, so a password that fails the free local rules never costs a network call.
+        return builder
+            .MustAsync(async (password, ct) => !await breachedChecker.IsBreachedAsync(password, ct))
+                .WithMessage("This password has appeared in a known data breach; choose a different one");
+    }
 }

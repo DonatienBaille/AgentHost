@@ -140,6 +140,16 @@ builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 builder.Services.AddSingleton<IMfaChallengeTokenService, MfaChallengeTokenService>();
 builder.Services.AddHttpClient();
 
+// Optional breached-password screening (Have I Been Pwned k-anonymity range API). Off unless
+// Auth:BreachedPasswordCheck:Enabled is true, and fail-open in every error case, so an unreachable
+// third party can never block a signup - see Services/BreachedPasswordChecker.cs.
+builder.Services.AddHttpClient(BreachedPasswordChecker.HttpClientName, client =>
+{
+    // HIBP requires a descriptive user agent and rejects requests without one.
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("AgentHost-Backend");
+});
+builder.Services.AddSingleton<IBreachedPasswordChecker, BreachedPasswordChecker>();
+
 // ---- Validation ----
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 

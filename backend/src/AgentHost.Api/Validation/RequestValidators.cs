@@ -1,4 +1,5 @@
 using AgentHost.Api.Contracts;
+using AgentHost.Api.Services;
 using FluentValidation;
 
 namespace AgentHost.Api.Validation;
@@ -91,22 +92,22 @@ public class CreateWebhookRequestValidator : AbstractValidator<CreateWebhookRequ
 
 public class CreateUserRequestValidator : AbstractValidator<CreateUserRequest>
 {
-    public CreateUserRequestValidator()
+    public CreateUserRequestValidator(IBreachedPasswordChecker breachedChecker)
     {
         RuleFor(x => x.Email).NotEmpty().EmailAddress();
-        RuleFor(x => x.Password).Password();
+        RuleFor(x => x.Password).Password(breachedChecker);
     }
 }
 
 public class RegisterRequestValidator : AbstractValidator<RegisterRequest>
 {
-    public RegisterRequestValidator()
+    public RegisterRequestValidator(IBreachedPasswordChecker breachedChecker)
     {
         RuleFor(x => x.OrgName).NotEmpty();
         RuleFor(x => x.OrgSlug).NotEmpty().Matches("^[a-z0-9-]+$")
             .WithMessage("Slug must be lowercase alphanumeric with dashes");
         RuleFor(x => x.Email).NotEmpty().EmailAddress();
-        RuleFor(x => x.Password).Password();
+        RuleFor(x => x.Password).Password(breachedChecker);
     }
 }
 
@@ -139,9 +140,9 @@ public class UpdateSecretRequestValidator : AbstractValidator<UpdateSecretReques
 /// <summary>A password change through PUT /api/users/{id} must clear the same bar as signup.</summary>
 public class UpdateUserRequestValidator : AbstractValidator<UpdateUserRequest>
 {
-    public UpdateUserRequestValidator()
+    public UpdateUserRequestValidator(IBreachedPasswordChecker breachedChecker)
     {
-        RuleFor(x => x.Password!).Password().When(x => !string.IsNullOrEmpty(x.Password));
+        RuleFor(x => x.Password!).Password(breachedChecker).When(x => !string.IsNullOrEmpty(x.Password));
     }
 }
 
@@ -167,10 +168,10 @@ public class CreateInvitationRequestValidator : AbstractValidator<CreateInvitati
 /// </summary>
 public class AcceptInvitationRequestValidator : AbstractValidator<AcceptInvitationRequest>
 {
-    public AcceptInvitationRequestValidator()
+    public AcceptInvitationRequestValidator(IBreachedPasswordChecker breachedChecker)
     {
         RuleFor(x => x.Token).NotEmpty();
-        RuleFor(x => x.Password).Password();
+        RuleFor(x => x.Password).Password(breachedChecker);
     }
 }
 
@@ -187,20 +188,20 @@ public class PasswordResetRequestRequestValidator : AbstractValidator<PasswordRe
 /// <summary>Resetting sets a password, so it clears the same bar as signup.</summary>
 public class PasswordResetConfirmRequestValidator : AbstractValidator<PasswordResetConfirmRequest>
 {
-    public PasswordResetConfirmRequestValidator()
+    public PasswordResetConfirmRequestValidator(IBreachedPasswordChecker breachedChecker)
     {
         RuleFor(x => x.Token).NotEmpty();
-        RuleFor(x => x.NewPassword).Password();
+        RuleFor(x => x.NewPassword).Password(breachedChecker);
     }
 }
 
 /// <summary>Changing a password sets a password, so it clears the same bar as signup.</summary>
 public class ChangePasswordRequestValidator : AbstractValidator<ChangePasswordRequest>
 {
-    public ChangePasswordRequestValidator()
+    public ChangePasswordRequestValidator(IBreachedPasswordChecker breachedChecker)
     {
         RuleFor(x => x.CurrentPassword).NotEmpty();
-        RuleFor(x => x.NewPassword).Password();
+        RuleFor(x => x.NewPassword).Password(breachedChecker);
     }
 }
 
