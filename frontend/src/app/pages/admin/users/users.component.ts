@@ -37,10 +37,7 @@ export class UsersComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    const orgId = this.authService.currentUser()?.orgId;
-    if (orgId) {
-      this.userService.listUsers(orgId);
-    }
+    this.userService.listUsers();
   }
 
   toggleForm(): void {
@@ -48,8 +45,7 @@ export class UsersComponent implements OnInit {
   }
 
   async submit(): Promise<void> {
-    const orgId = this.authService.currentUser()?.orgId;
-    if (!orgId || this.form.invalid) {
+    if (this.form.invalid) {
       this.form.markAllAsTouched();
       return;
     }
@@ -59,7 +55,6 @@ export class UsersComponent implements OnInit {
     try {
       const { email, password, displayName, role } = this.form.getRawValue();
       await this.userService.createUser({
-        orgId,
         email: email!,
         password: password!,
         displayName: displayName || undefined,

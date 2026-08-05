@@ -55,9 +55,8 @@ export class AgentsListComponent implements OnInit {
   }
 
   async submit(): Promise<void> {
-    const orgId = this.authService.currentUser()?.orgId;
     const projectId = this.projectId();
-    if (!orgId || !projectId || this.form.invalid) {
+    if (!projectId || this.form.invalid) {
       this.form.markAllAsTouched();
       return;
     }
@@ -67,7 +66,6 @@ export class AgentsListComponent implements OnInit {
     try {
       const { name, slug, manifestYaml, publish } = this.form.getRawValue();
       await this.agentService.createAgent({
-        orgId,
         projectId,
         name: name!,
         slug: slug!,

@@ -43,8 +43,7 @@ export class ProjectsListComponent implements OnInit {
   }
 
   async submit(): Promise<void> {
-    const orgId = this.authService.currentUser()?.orgId;
-    if (!orgId || this.form.invalid) {
+    if (this.form.invalid) {
       this.form.markAllAsTouched();
       return;
     }
@@ -54,7 +53,6 @@ export class ProjectsListComponent implements OnInit {
     try {
       const { name, slug, description, budgetMonthlyUsd } = this.form.getRawValue();
       await this.projectService.createProject({
-        orgId,
         name: name!,
         slug: slug!,
         description: description || undefined,

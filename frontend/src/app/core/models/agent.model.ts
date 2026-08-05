@@ -24,7 +24,6 @@ export interface Agent {
  * from the manifest YAML rather than accepting them as separate fields.
  */
 export interface CreateAgentRequest {
-  orgId: string;
   projectId: string;
   name: string;
   slug: string;

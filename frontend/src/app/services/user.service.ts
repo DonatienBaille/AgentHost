@@ -14,12 +14,11 @@ export class UserService {
   readonly isLoading = signal(false);
   readonly error = signal<string | null>(null);
 
-  async listUsers(orgId: string): Promise<void> {
+  /** Lists the caller's own organization's users — the server scopes by the JWT, no orgId param. */
+  async listUsers(): Promise<void> {
     this.isLoading.set(true);
     try {
-      const data = await firstValueFrom(
-        this.http.get<User[]>(`${BASE_URL}?orgId=${encodeURIComponent(orgId)}`),
-      );
+      const data = await firstValueFrom(this.http.get<User[]>(BASE_URL));
       this.users.set(data ?? []);
       this.error.set(null);
     } catch (err) {

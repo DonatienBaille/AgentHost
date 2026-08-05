@@ -9,8 +9,8 @@ export interface Project {
   updatedAt: string;
 }
 
+/** No orgId: the server takes the owning org from the caller's JWT (Contracts/ProjectContracts.cs). */
 export interface CreateProjectRequest {
-  orgId: string;
   name: string;
   slug: string;
   description?: string;
