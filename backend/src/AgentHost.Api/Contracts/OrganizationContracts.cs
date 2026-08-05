@@ -6,3 +6,9 @@ public class CreateOrganizationRequest
     public string Slug { get; set; } = string.Empty;
     public string Plan { get; set; } = "free";
 }
+
+public class UpdateOrganizationRequest
+{
+    public string? Name { get; set; }
+    public string? Plan { get; set; }
+}

@@ -12,3 +12,10 @@ public class CreateAgentRequest
 
     public bool Publish { get; set; } = true;
 }
+
+public class UpdateAgentRequest
+{
+    // Name only — manifest/schema changes must go through POST /api/agents/{id}/versions
+    // (AgentVersionEndpoints), which snapshots a new immutable version.
+    public string? Name { get; set; }
+}

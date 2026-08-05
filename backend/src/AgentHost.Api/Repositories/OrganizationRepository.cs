@@ -12,6 +12,7 @@ public interface IOrganizationRepository
     Task<List<Organization>> ListAsync(CancellationToken ct = default);
     Task InsertAsync(Organization org, CancellationToken ct = default);
     Task UpdateAsync(Organization org, CancellationToken ct = default);
+    Task SoftDeleteAsync(string id, CancellationToken ct = default);
 }
 
 public class OrganizationRepository : IOrganizationRepository
@@ -70,5 +71,13 @@ public class OrganizationRepository : IOrganizationRepository
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, org, cancellationToken: ct));
         _logger.Information("Updated organization {OrgId}", org.Id);
+    }
+
+    public async Task SoftDeleteAsync(string id, CancellationToken ct = default)
+    {
+        const string sql = "UPDATE organizations SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id";
+        using var db = _connectionFactory.CreateConnection();
+        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        _logger.Information("Soft-deleted organization {OrgId}", id);
     }
 }

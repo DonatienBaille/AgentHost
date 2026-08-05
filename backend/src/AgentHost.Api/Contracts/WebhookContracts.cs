@@ -7,3 +7,11 @@ public class CreateWebhookRequest
     public List<string> Events { get; set; } = new();
     public string? SecretToken { get; set; }
 }
+
+public class UpdateWebhookRequest
+{
+    public string? Url { get; set; }
+    public List<string>? Events { get; set; }
+    public string? SecretToken { get; set; }
+    public bool? IsActive { get; set; }
+}

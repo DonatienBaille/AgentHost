@@ -12,6 +12,7 @@ public interface IWebhookRepository
     Task<List<Webhook>> ListActiveForEventAsync(string projectId, string eventName, CancellationToken ct = default);
     Task InsertAsync(Webhook webhook, CancellationToken ct = default);
     Task UpdateAsync(Webhook webhook, CancellationToken ct = default);
+    Task DeleteAsync(string id, CancellationToken ct = default);
 }
 
 public class WebhookRepository : IWebhookRepository
@@ -76,5 +77,13 @@ public class WebhookRepository : IWebhookRepository
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, webhook, cancellationToken: ct));
         _logger.Information("Updated webhook {WebhookId}", webhook.Id);
+    }
+
+    public async Task DeleteAsync(string id, CancellationToken ct = default)
+    {
+        const string sql = "DELETE FROM webhooks WHERE id = @Id";
+        using var db = _connectionFactory.CreateConnection();
+        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        _logger.Information("Deleted webhook {WebhookId}", id);
     }
 }

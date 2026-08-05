@@ -19,6 +19,8 @@ public static class SecretEndpoints
 
         secretsApi.MapPost("/", CreateSecret).WithName("CreateSecret").WithValidation<CreateSecretRequest>()
             .RequireAuthorization(AuthorizationPolicies.Maintainer);
+        secretsApi.MapDelete("/{id}", DeleteSecret).WithName("DeleteSecret")
+            .RequireAuthorization(AuthorizationPolicies.Maintainer);
 
         return app;
     }
@@ -51,5 +53,14 @@ public static class SecretEndpoints
             Scope = secret.Scope.ToDbString(),
             secret.CreatedAt,
         });
+    }
+
+    private static async Task<IResult> DeleteSecret(string id, ISecretRepository repository, CancellationToken ct)
+    {
+        var secret = await repository.GetAsync(id, ct);
+        if (secret is null) return Results.NotFound();
+
+        await repository.SoftDeleteAsync(id, ct);
+        return Results.NoContent();
     }
 }
