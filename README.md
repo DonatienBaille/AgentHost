@@ -25,7 +25,7 @@ backend/              ASP.NET Core API (AgentHost.Api) + tests
 frontend/             Angular SPA
 migrations/           Schéma PostgreSQL (section 5 de la spec)
 charts/agenthost/     Helm chart (Kubernetes)
-docs/                 Protocole agent, notes d'implémentation
+docs/                 Protocole agent, modèle d'authentification, notes d'implémentation
 docker-compose.yml    Stack dev/local complète
 docker-compose.podman.yml  Overlay Podman (voir « Runtime de conteneurs »)
 Dockerfile.backend
