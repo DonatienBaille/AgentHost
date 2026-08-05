@@ -1,3 +1,8 @@
+{{- $artifactProvider := .Values.artifacts.provider | default "local" -}}
+{{- $localArtifacts := eq $artifactProvider "local" -}}
+{{- if not (has $artifactProvider (list "local" "s3")) -}}
+  {{- fail (printf "artifacts.provider must be 'local' or 's3', got %q" $artifactProvider) -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -73,6 +78,16 @@ spec:
               value: {{ .Values.docker.host | default (printf "unix://%s" .Values.docker.socketPath) | quote }}
             - name: Docker__WorkspacePath
               value: /var/agenthost/runs
+            {{- with .Values.docker.hostWorkspacePath }}
+            # The node's own path for the same directory: bind sources are resolved by the daemon,
+            # not by this pod. See the values.yaml comment before setting it.
+            - name: Docker__HostWorkspacePath
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.docker.bindMountOptions }}
+            - name: Docker__BindMountOptions
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.docker.egressProxy }}
             - name: Docker__EgressProxy
               value: {{ . | quote }}
@@ -81,8 +96,45 @@ spec:
             - name: Docker__AllowlistNetwork
               value: {{ . | quote }}
             {{- end }}
+            - name: Artifacts__Provider
+              value: {{ $artifactProvider | quote }}
+            {{- if $localArtifacts }}
             - name: Artifacts__StoragePath
               value: /var/agenthost/artifacts
+            {{- else }}
+            - name: Artifacts__S3__Bucket
+              value: {{ required "artifacts.s3.bucket is required when artifacts.provider is 's3'" .Values.artifacts.s3.bucket | quote }}
+            {{- with .Values.artifacts.s3.serviceUrl }}
+            - name: Artifacts__S3__ServiceUrl
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.artifacts.s3.region }}
+            - name: Artifacts__S3__Region
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.artifacts.s3.forcePathStyle }}
+            - name: Artifacts__S3__ForcePathStyle
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.artifacts.s3.keyPrefix }}
+            - name: Artifacts__S3__KeyPrefix
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.artifacts.s3.accessKey }}
+            # Static credentials. On AWS prefer IRSA/workload identity and leave these empty, so no
+            # long-lived key exists to leak in the first place.
+            - name: Artifacts__S3__AccessKey
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agenthost.fullname" . }}-secrets
+                  key: s3AccessKey
+            - name: Artifacts__S3__SecretKey
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agenthost.fullname" . }}-secrets
+                  key: s3SecretKey
+            {{- end }}
+            {{- end }}
             - name: Retention__WorkspaceHours
               value: {{ .Values.retention.workspaceHours | quote }}
             - name: Retention__SecretsGraceMinutes
@@ -108,8 +160,10 @@ spec:
           volumeMounts:
             - name: runs
               mountPath: /var/agenthost/runs
+            {{- if $localArtifacts }}
             - name: artifacts
               mountPath: /var/agenthost/artifacts
+            {{- end }}
             {{- if .Values.docker.mountSocket }}
             - name: docker-socket
               mountPath: {{ .Values.docker.socketPath }}
@@ -140,6 +194,7 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if $localArtifacts }}
         - name: artifacts
           {{- if .Values.persistence.artifacts.enabled }}
           persistentVolumeClaim:
@@ -147,6 +202,7 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- end }}
         {{- if .Values.docker.mountSocket }}
         # The orchestrator launches agents on the node's Docker daemon; with no socket here and no
         # proxy in docker.host, the backend cannot start a single run.

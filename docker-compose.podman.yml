@@ -1,0 +1,63 @@
+# Podman overlay for docker-compose.yml.
+#
+#   podman system service --time=0 unix:///run/podman/podman.sock &   # rootful, see below
+#   docker compose -f docker-compose.yml -f docker-compose.podman.yml up --build
+#
+# (`podman-compose -f docker-compose.yml -f docker-compose.podman.yml up` works the same way; so
+# does `docker compose` itself when DOCKER_HOST points at the Podman socket.)
+#
+# Nothing in the application changes: Podman serves the Docker REST API, and the orchestrator makes
+# exactly the same calls against it — image pull, container create/start/wait/logs/remove, list by
+# label. There is no "runtime" setting to flip. What this file changes is the socket the API proxy
+# fronts and the mount options, which is the whole of the real difference.
+#
+# ---------------------------------------------------------------------------------------------
+# ROOTFUL vs ROOTLESS — read this before choosing.
+#
+# ROOTFUL (`sudo podman system service ...` on /run/podman/podman.sock) is what this file targets.
+# uid semantics are then identical to Docker's: the backend writes {runs}/{runId}/secrets as uid
+# 64198 on the host, and an agent container running as uid 0 reads it through the bind mount. Every
+# default in docker-compose.yml carries over unchanged.
+#
+# ROOTLESS (`podman system service` as your own user, on $XDG_RUNTIME_DIR/podman/podman.sock) also
+# works, but ownership has to be dealt with explicitly, and there is no single setting that does it:
+#
+#   * The host directories are seen by the backend container through a uid mapping. `chown 64198`
+#     on the host is NOT what the container sees — use `podman unshare chown -R 64198:64198 runs
+#     artifacts`, which chowns to the mapped subuid, or add `:U` to those two mounts and let Podman
+#     do it at start-up.
+#   * The agent containers get {runs}/{runId}/{workspace,secrets} bind-mounted by the same rootless
+#     daemon. An agent running as uid 0 in its own userns maps back to YOUR uid on the host, not to
+#     the backend's 64198, so it cannot read the 0400 secret files. The fix is Docker__BindMountOptions=U
+#     (Podman chowns the mounted tree to the container's user at mount time) — but be aware that this
+#     mutates ownership of the directory the backend then has to delete after the run: if secrets
+#     cleanup starts failing in the logs, that is why, and the answer is to run the service rootfully
+#     or to run the backend itself with `--userns=keep-id` so both sides share one uid.
+#
+# This trade-off is a property of rootless user namespaces, not of AgentHost. Rootful Podman is the
+# configuration we can state works the same way Docker does.
+# ---------------------------------------------------------------------------------------------
+
+services:
+  # tecnativa/docker-socket-proxy fronts a Podman socket exactly as it fronts a Docker one: it is an
+  # HTTP filter in front of a Docker-API-speaking unix socket, and Podman's compat service is one.
+  # Same endpoint allowlist, same deny-by-default.
+  docker-socket-proxy:
+    volumes:
+      # Rootful default. Rootless: AGENTHOST_PODMAN_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock
+      # (and see the ownership notes above).
+      - ${AGENTHOST_PODMAN_SOCKET:-/run/podman/podman.sock}:/var/run/docker.sock:ro
+
+  backend:
+    environment:
+      # Unchanged: the proxy speaks the Docker API on 2375 whatever is behind it.
+      Docker__Host: tcp://docker-socket-proxy:2375
+      # Extra options appended to the bind specs of every AGENT container. 'z' relabels for SELinux,
+      # which is on by default on the Fedora/RHEL family where Podman is most common; it is a no-op
+      # elsewhere. Rootless deployments generally need 'U' here as well — read the header first.
+      Docker__BindMountOptions: ${AGENTHOST_BIND_MOUNT_OPTIONS:-z}
+    volumes:
+      # ':z' relabels these two for SELinux. Add ':U' (i.e. ':z,U') on a rootless service to have
+      # Podman chown them to the backend's uid instead of doing it with `podman unshare chown`.
+      - ./runs:/var/agenthost/runs:z
+      - ./artifacts:/var/agenthost/artifacts:z

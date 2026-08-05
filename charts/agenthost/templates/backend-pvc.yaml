@@ -22,7 +22,12 @@ spec:
   storageClassName: {{ . }}
   {{- end }}
 {{- end }}
-{{- if .Values.persistence.artifacts.enabled }}
+{{- /*
+The artifacts claim is only meaningful for artifacts.provider=local. With provider=s3 the bytes live
+in a bucket, nothing is written to this volume, and it should be disabled
+(persistence.artifacts.enabled=false) rather than provisioned and left empty.
+*/ -}}
+{{- if and .Values.persistence.artifacts.enabled (eq (.Values.artifacts.provider | default "local") "local") }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

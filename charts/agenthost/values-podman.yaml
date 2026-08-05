@@ -1,0 +1,50 @@
+# Example overlay for nodes whose container runtime is Podman rather than Docker, with artifacts in
+# an S3-compatible bucket.
+#
+#   helm template charts/agenthost -f charts/agenthost/values-podman.yaml \
+#     --set secrets.jwtSecret=... --set secrets.encryptionKey=... --set postgres.auth.password=...
+#
+# Nothing about the application changes: Podman answers the Docker REST API and the orchestrator
+# issues the same calls either way. Only the socket path and the mount options differ.
+
+docker:
+  # Rootful Podman service on the node:
+  #   systemctl enable --now podman.socket      # creates /run/podman/podman.sock
+  # uid semantics then match Docker's exactly.
+  #
+  # Rootless (/run/user/<uid>/podman/podman.sock) is possible but the backend pod would have to run
+  # as that same uid and share its user namespace; read the Podman section of README.md first — the
+  # ownership constraints are real and there is no setting here that removes them.
+  mountSocket: true
+  socketPath: /run/podman/podman.sock
+  # Whoever holds this socket is root on the node. tecnativa/docker-socket-proxy fronts a Podman
+  # socket exactly as it fronts a Docker one; deploy it separately, point `host` at it and set
+  # mountSocket: false.
+  host: ""
+
+  # Most Podman hosts (Fedora/RHEL family) run with SELinux enforcing, so agent bind mounts need a
+  # relabel. Add "U" as well on a rootless service — see the README.
+  bindMountOptions: "z"
+
+  # The node's own path for the runs directory. Bind sources are resolved by the daemon, so this
+  # must be a path the NODE has: only coherent with a hostPath-backed runs volume mounted at the
+  # same absolute path. Left empty here because the chart's default runs volume is a PVC.
+  hostWorkspacePath: ""
+
+# Artifacts in a bucket instead of on the node. This is what makes artifact serving independent of
+# which node the pod landed on; the orchestrator remains node-bound, so replicaCount stays 1.
+artifacts:
+  provider: s3
+  s3:
+    bucket: agenthost-artifacts
+    serviceUrl: http://minio.minio.svc.cluster.local:9000
+    region: us-east-1
+    keyPrefix: artifacts
+    # On AWS, leave these empty and attach an IRSA role instead of shipping a long-lived key.
+    accessKey: ""
+    secretKey: ""
+
+persistence:
+  artifacts:
+    # Nothing writes to it once artifacts live in the bucket.
+    enabled: false

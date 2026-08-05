@@ -93,7 +93,16 @@ services:
       Redis__Port: "6379"
       # Through the filtering proxy, never the raw socket (see docker-socket-proxy above).
       Docker__Host: tcp://docker-socket-proxy:2375
+      # Where THIS container reads/writes run data...
       Docker__WorkspacePath: /var/agenthost/runs
+      # ...and where the DAEMON sees the same directory. These differ, and that difference is
+      # exactly what used to make the compose stack unable to launch a single agent: bind sources
+      # are resolved by the daemon (on the host), so sending /var/agenthost/runs made it mount a
+      # freshly created empty directory — empty /workspace, empty /run/secrets, no error anywhere.
+      # ${PWD} is the directory `docker compose` was invoked from, i.e. the host path of ./runs
+      # below. Override with AGENTHOST_HOST_RUNS_PATH when the daemon is remote or the repo is
+      # reached through a different mount point on the daemon's host.
+      Docker__HostWorkspacePath: ${AGENTHOST_HOST_RUNS_PATH:-${PWD}/runs}
       # Agents with permissions.network=allowlist need an egress proxy; unset here, so such runs
       # get no network at all rather than unfiltered egress. Point this at your proxy to enable
       # them, e.g. http://egress-proxy:3128.

@@ -26,16 +26,34 @@ service:
     # The frontend image runs nginx unprivileged, so inside the container it listens on 8080.
     containerPort: 8080
 
-# Docker daemon access for the orchestrator.
+# Container runtime access for the orchestrator.
+#
+# Docker and Podman both serve the Docker REST API and the orchestrator makes identical calls
+# against either, so there is no runtime switch — only the socket path differs. For Podman:
+#   socketPath: /run/podman/podman.sock     (rootful service; see values-podman.yaml)
+#   socketPath: /run/user/<uid>/podman/podman.sock   (rootless — read the Podman section of README)
 docker:
-  # Mount the node's Docker socket into the backend pod. Without it — and without `host` pointing
+  # Mount the node's runtime socket into the backend pod. Without it — and without `host` pointing
   # somewhere else — the backend cannot launch a single agent, because it has no daemon to talk to.
   #
   # SECURITY: whoever holds this socket is root on the node. Prefer deploying a filtering socket
-  # proxy (as docker-compose.yml does with tecnativa/docker-socket-proxy), pointing `host` at it,
-  # and leaving mountSocket off.
+  # proxy (as docker-compose.yml does with tecnativa/docker-socket-proxy — it fronts a Podman socket
+  # just as well), pointing `host` at it, and leaving mountSocket off.
   mountSocket: true
   socketPath: /var/run/docker.sock
+  # Path at which the NODE (i.e. the daemon) sees the same directory the backend has mounted at
+  # /var/agenthost/runs. Bind sources are resolved by the daemon, not by the backend pod, so with a
+  # PVC that the daemon cannot see under that name, agents start with an empty /workspace and an
+  # empty /run/secrets and nothing reports an error.
+  #
+  # Leave empty ONLY when the runs volume is a hostPath that the node exposes at the same absolute
+  # path (the simple, and honestly the only fully coherent, node-bound setup). With a networked PVC
+  # there is generally no such path and agent bind mounts cannot work at all — that is a property of
+  # handing a node's daemon a path from another filesystem, not something this chart can paper over.
+  hostWorkspacePath: ""
+  # Extra options appended to every agent bind mount, comma-separated. SELinux nodes: "z".
+  # Rootless Podman: "U" (chown the mounted tree into the container's user namespace).
+  bindMountOptions: ""
   # Docker__Host. Empty means unix://{socketPath}; set to e.g. tcp://docker-socket-proxy:2375 to go
   # through a filtering proxy.
   host: ""
@@ -49,6 +67,32 @@ docker:
   # Optional Docker network for allowlist runs. Use an internal network on which only the egress
   # proxy is reachable — otherwise HTTP_PROXY is advisory and a raw socket bypasses it.
   allowlistNetwork: ""
+
+# Where run artifacts are stored.
+#
+#   local  (default) — files under /var/agenthost/artifacts in the backend pod, i.e. on the
+#                      persistence.artifacts volume below.
+#   s3              — any S3-compatible object store: AWS S3, MinIO, Ceph RGW. The
+#                     persistence.artifacts PVC then serves no purpose and should be disabled;
+#                     nothing writes to it.
+#
+# S3 artifacts are the PREREQUISITE for serving artifacts from more than one replica, not the thing
+# that delivers it: with objects in a bucket, any replica can serve any artifact. The orchestrator
+# is still node-bound (see replicaCount), so replicaCount stays 1 regardless.
+artifacts:
+  provider: local
+  s3:
+    bucket: ""
+    # Custom endpoint for MinIO/Ceph, e.g. http://minio.minio.svc:9000. Empty = real AWS S3.
+    serviceUrl: ""
+    region: ""
+    # Leave both empty to use the ambient credential chain (IRSA / workload identity / node role),
+    # which is the right answer on AWS. When set, they are written into the chart's Secret.
+    accessKey: ""
+    secretKey: ""
+    # Defaults to true whenever serviceUrl is set (MinIO/Ceph have no per-bucket DNS).
+    forcePathStyle: ""
+    keyPrefix: artifacts
 
 # Run workspaces and artifacts are files on disk: the orchestrator writes them, and the API reads
 # them back when an artifact is downloaded. With no volume they live in the pod's ephemeral
@@ -64,6 +108,8 @@ persistence:
     accessMode: ReadWriteOnce
     storageClass: ""
   artifacts:
+    # Set to false when artifacts.provider is "s3": the volume is then never written to, and the
+    # chart stops mounting it. Kept enabled by default because the default provider is "local".
     enabled: true
     size: 20Gi
     accessMode: ReadWriteOnce
