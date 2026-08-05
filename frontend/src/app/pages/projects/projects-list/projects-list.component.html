@@ -1,0 +1,82 @@
+<!-- src/app/pages/projects/projects-list/projects-list.component.html -->
+
+<div class="p-6 max-w-5xl mx-auto">
+  <div class="flex items-center justify-between mb-8">
+    <h1 class="text-3xl font-bold">{{ 'projectsList.title' | translate }}</h1>
+    @if (canCreate()) {
+      <button
+        type="button"
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
+        (click)="toggleForm()"
+      >
+        {{ (showForm() ? 'common.cancel' : 'projectsList.newProject') | translate }}
+      </button>
+    }
+  </div>
+
+  @if (error()) {
+    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+      <p class="text-red-200">{{ error() }}</p>
+    </div>
+  }
+
+  @if (showForm()) {
+    <form [formGroup]="form" (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
+      @if (submitError()) {
+        <div class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
+          {{ submitError() | translate }}
+        </div>
+      }
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="p-name">{{ 'projectsList.name' | translate }}</label>
+          <input id="p-name" type="text" formControlName="name" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="p-slug">{{ 'projectsList.slug' | translate }}</label>
+          <input id="p-slug" type="text" formControlName="slug" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm text-gray-400 mb-1" for="p-description">{{ 'projectsList.description' | translate }}</label>
+        <input id="p-description" type="text" formControlName="description" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm" />
+      </div>
+      <div class="w-48">
+        <label class="block text-sm text-gray-400 mb-1" for="p-budget">{{ 'projectsList.budget' | translate }}</label>
+        <input id="p-budget" type="number" formControlName="budgetMonthlyUsd" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm" />
+      </div>
+      <button
+        type="submit"
+        [disabled]="isSubmitting()"
+        class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded font-medium transition"
+      >
+        {{ (isSubmitting() ? 'common.saving' : 'common.create') | translate }}
+      </button>
+    </form>
+  }
+
+  @if (isLoading()) {
+    <div class="flex justify-center py-8">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+  }
+
+  <div class="grid gap-4 sm:grid-cols-2">
+    @for (project of projects(); track project.id) {
+      <a
+        [routerLink]="['/projects', project.id]"
+        class="block bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-blue-500 transition"
+      >
+        <div class="font-medium">{{ project.name }}</div>
+        <div class="text-xs text-gray-500 font-mono mt-1">{{ project.slug }}</div>
+        @if (project.description) {
+          <div class="text-sm text-gray-400 mt-2">{{ project.description }}</div>
+        }
+      </a>
+    }
+
+    @if (!isLoading() && projects().length === 0) {
+      <p class="text-gray-500 text-sm">{{ 'projectsList.empty' | translate }}</p>
+    }
+  </div>
+</div>

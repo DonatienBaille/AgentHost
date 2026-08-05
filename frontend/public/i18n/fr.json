@@ -1,10 +1,22 @@
 {
   "nav": {
     "dashboard": "Tableau de bord",
-    "runs": "Runs"
+    "projects": "Projets",
+    "agents": "Agents",
+    "runs": "Runs",
+    "admin": "Admin",
+    "adminUsers": "Utilisateurs",
+    "adminOrganizations": "Organisations",
+    "adminSecrets": "Secrets",
+    "adminAuditLog": "Journal d'audit",
+    "logout": "Déconnexion"
   },
   "common": {
-    "refresh": "Actualiser"
+    "refresh": "Actualiser",
+    "cancel": "Annuler",
+    "create": "Créer",
+    "saving": "Enregistrement…",
+    "delete": "Supprimer"
   },
   "status": {
     "pending": "En attente",
@@ -41,7 +53,10 @@
     "status": "Statut",
     "duration": "Durée",
     "cost": "Coût",
-    "created": "Créé le"
+    "created": "Créé le",
+    "artifacts": "Artefacts",
+    "download": "Télécharger",
+    "noArtifacts": "Aucun artefact pour le moment."
   },
   "newRun": {
     "title": "Nouveau run",
@@ -82,6 +97,116 @@
     "newRun": "Nouveau run",
     "recentRuns": "Runs récents",
     "noRuns": "Aucun run pour ce projet.",
-    "memory": "Mémoire du projet"
+    "memory": "Mémoire du projet",
+    "agents": "Agents",
+    "webhooks": "Webhooks"
+  },
+  "login": {
+    "signIn": "Se connecter",
+    "signingIn": "Connexion…",
+    "createOrg": "Créer une organisation",
+    "creating": "Création…",
+    "email": "Email",
+    "password": "Mot de passe",
+    "passwordHint": "8 caractères minimum.",
+    "orgName": "Nom de l'organisation",
+    "orgSlug": "Slug de l'organisation",
+    "displayName": "Nom affiché (optionnel)",
+    "invalidCredentials": "Email ou mot de passe incorrect.",
+    "orgSlugTaken": "Ce slug d'organisation est déjà utilisé.",
+    "genericError": "Une erreur est survenue. Veuillez réessayer."
+  },
+  "projectsList": {
+    "title": "Projets",
+    "newProject": "Nouveau projet",
+    "name": "Nom",
+    "slug": "Slug",
+    "description": "Description",
+    "budget": "Budget mensuel (USD)",
+    "empty": "Aucun projet pour le moment.",
+    "createError": "Échec de la création du projet."
+  },
+  "agentsList": {
+    "title": "Agents",
+    "titleForProject": "Agents du projet",
+    "newAgent": "Nouvel agent",
+    "name": "Nom",
+    "slug": "Slug",
+    "manifest": "Manifeste (YAML)",
+    "publishImmediately": "Publier immédiatement",
+    "published": "Publié",
+    "draft": "Brouillon",
+    "empty": "Aucun agent pour le moment.",
+    "createError": "Échec de la création de l'agent."
+  },
+  "agentDetail": {
+    "manifest": "Manifeste",
+    "versions": "Historique des versions",
+    "noVersions": "Aucune version pour le moment.",
+    "publishNew": "Publier une nouvelle version",
+    "publish": "Publier la version",
+    "loadError": "Échec du chargement de cet agent.",
+    "publishError": "Échec de la publication de la nouvelle version."
+  },
+  "adminUsers": {
+    "title": "Utilisateurs",
+    "newUser": "Nouvel utilisateur",
+    "email": "Email",
+    "password": "Mot de passe",
+    "displayName": "Nom affiché",
+    "role": "Rôle",
+    "createdAt": "Créé le",
+    "empty": "Aucun utilisateur pour le moment.",
+    "createError": "Échec de la création de l'utilisateur."
+  },
+  "roles": {
+    "owner": "Propriétaire",
+    "maintainer": "Mainteneur",
+    "developer": "Développeur",
+    "viewer": "Lecteur"
+  },
+  "adminOrgs": {
+    "title": "Organisations",
+    "newOrg": "Nouvelle organisation",
+    "ownerOnly": "Seuls les propriétaires peuvent gérer les organisations.",
+    "name": "Nom",
+    "slug": "Slug",
+    "plan": "Offre",
+    "empty": "Aucune organisation pour le moment.",
+    "createError": "Échec de la création de l'organisation."
+  },
+  "adminSecrets": {
+    "title": "Secrets",
+    "newSecret": "Nouveau secret",
+    "name": "Nom",
+    "scope": "Portée",
+    "scopeOrg": "Organisation",
+    "scopeProject": "Projet",
+    "projectId": "ID du projet",
+    "value": "Valeur",
+    "lastUsed": "Dernière utilisation",
+    "empty": "Aucun secret pour le moment.",
+    "createError": "Échec de la création du secret."
+  },
+  "adminWebhooks": {
+    "title": "Webhooks",
+    "newWebhook": "Nouveau webhook",
+    "url": "URL",
+    "secretToken": "Jeton secret (optionnel)",
+    "events": "Événements",
+    "active": "Actif",
+    "inactive": "Inactif",
+    "activate": "Activer",
+    "deactivate": "Désactiver",
+    "empty": "Aucun webhook pour ce projet.",
+    "createError": "Échec de la création du webhook."
+  },
+  "adminAudit": {
+    "title": "Journal d'audit",
+    "action": "Action",
+    "actor": "Acteur",
+    "resource": "Ressource",
+    "timestamp": "Horodatage",
+    "empty": "Aucune entrée dans le journal d'audit."
   }
 }

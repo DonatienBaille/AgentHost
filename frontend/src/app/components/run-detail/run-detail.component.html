@@ -116,6 +116,42 @@
         </div>
       }
 
+      <!-- Artifacts -->
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <h3 class="font-semibold mb-2">{{ 'runDetail.artifacts' | translate }}</h3>
+
+        @if (isLoadingArtifacts()) {
+          <div class="flex justify-center py-4">
+            <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+          </div>
+        }
+
+        <div class="space-y-2">
+          @for (artifact of artifacts(); track artifact.id) {
+            <div class="flex items-center justify-between gap-2 bg-gray-900 border border-gray-700 rounded p-2">
+              <div class="min-w-0">
+                <div class="text-sm truncate">{{ artifact.name }}</div>
+                <div class="text-xs text-gray-500">
+                  {{ artifact.artifactType || '—' }} · {{ formatBytes(artifact.sizeBytes) }}
+                </div>
+              </div>
+              <button
+                type="button"
+                [disabled]="downloadingId() === artifact.id"
+                class="px-2 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs transition shrink-0"
+                (click)="downloadArtifact(artifact)"
+              >
+                {{ 'runDetail.download' | translate }}
+              </button>
+            </div>
+          }
+
+          @if (!isLoadingArtifacts() && artifacts().length === 0) {
+            <p class="text-gray-500 text-sm">{{ 'runDetail.noArtifacts' | translate }}</p>
+          }
+        </div>
+      </div>
+
       <!-- SignalR Connection Status -->
       <div
         class="px-3 py-2 rounded text-xs font-mono"

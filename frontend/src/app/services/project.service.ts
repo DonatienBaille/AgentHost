@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
-import { Project, ProjectMemory } from '../core/models';
+import { CreateProjectRequest, Project, ProjectMemory } from '../core/models';
 
 const BASE_URL = `${environment.apiUrl}/api/projects`;
 
@@ -67,5 +67,11 @@ export class ProjectService {
 
   selectProject(id: string): void {
     this.currentProjectId.set(id);
+  }
+
+  async createProject(req: CreateProjectRequest): Promise<Project> {
+    const project = await firstValueFrom(this.http.post<Project>(BASE_URL, req));
+    this.projects.set([...this.projects(), project]);
+    return project;
   }
 }

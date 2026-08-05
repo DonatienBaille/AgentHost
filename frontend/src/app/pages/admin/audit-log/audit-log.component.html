@@ -1,0 +1,50 @@
+<!-- src/app/pages/admin/audit-log/audit-log.component.html -->
+
+<div class="p-6 max-w-6xl mx-auto">
+  <h1 class="text-3xl font-bold mb-8">{{ 'adminAudit.title' | translate }}</h1>
+
+  @if (error()) {
+    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+      <p class="text-red-200">{{ error() }}</p>
+    </div>
+  }
+
+  @if (isLoading()) {
+    <div class="flex justify-center py-8">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+  }
+
+  <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-gray-400 border-b border-gray-700">
+          <th class="px-4 py-2">{{ 'adminAudit.action' | translate }}</th>
+          <th class="px-4 py-2">{{ 'adminAudit.actor' | translate }}</th>
+          <th class="px-4 py-2">{{ 'adminAudit.resource' | translate }}</th>
+          <th class="px-4 py-2">{{ 'adminAudit.timestamp' | translate }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (entry of entries(); track entry.id) {
+          <tr class="border-b border-gray-700 last:border-0">
+            <td class="px-4 py-2 font-mono text-xs">{{ entry.action }}</td>
+            <td class="px-4 py-2 text-gray-400">{{ entry.actorUserId || '—' }}</td>
+            <td class="px-4 py-2 text-gray-400">
+              @if (entry.resourceType) {
+                {{ entry.resourceType }}:{{ entry.resourceId }}
+              } @else {
+                —
+              }
+            </td>
+            <td class="px-4 py-2 text-gray-500">{{ entry.createdAt | date: 'medium' }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+
+    @if (!isLoading() && entries().length === 0) {
+      <p class="text-gray-500 text-sm p-4">{{ 'adminAudit.empty' | translate }}</p>
+    }
+  </div>
+</div>

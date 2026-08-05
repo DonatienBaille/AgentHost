@@ -1,35 +1,85 @@
 <div class="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white">
-  <nav class="sticky top-0 z-20 bg-gray-900/95 backdrop-blur border-b border-gray-700 px-6 py-3">
-    <div class="max-w-7xl mx-auto flex items-center justify-between">
-      <a routerLink="/" class="text-lg font-bold flex items-center gap-2">
-        <span>Agent Host</span>
-      </a>
-
-      <div class="flex items-center gap-4 text-sm">
-        <a routerLink="/" routerLinkActive="text-blue-400" [routerLinkActiveOptions]="{ exact: true }" class="text-gray-300 hover:text-white transition">
-          {{ 'nav.dashboard' | translate }}
-        </a>
-        <a routerLink="/runs" routerLinkActive="text-blue-400" class="text-gray-300 hover:text-white transition">
-          {{ 'nav.runs' | translate }}
+  @if (!isLoginRoute()) {
+    <nav class="sticky top-0 z-20 bg-gray-900/95 backdrop-blur border-b border-gray-700 px-6 py-3">
+      <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+        <a routerLink="/" class="text-lg font-bold flex items-center gap-2 shrink-0">
+          <span>Agent Host</span>
         </a>
 
-        <div class="flex items-center gap-1 ml-4 border-l border-gray-700 pl-4">
-          @for (lang of languages; track lang) {
-            <button
-              type="button"
-              class="px-2 py-1 rounded text-xs uppercase transition"
-              [class.bg-blue-600]="currentLanguage() === lang"
-              [class.text-white]="currentLanguage() === lang"
-              [class.text-gray-400]="currentLanguage() !== lang"
-              (click)="useLanguage(lang)"
-            >
-              {{ lang }}
-            </button>
+        <div class="flex items-center gap-4 text-sm overflow-x-auto">
+          <a routerLink="/" routerLinkActive="text-blue-400" [routerLinkActiveOptions]="{ exact: true }" class="text-gray-300 hover:text-white transition whitespace-nowrap">
+            {{ 'nav.dashboard' | translate }}
+          </a>
+          <a routerLink="/projects" routerLinkActive="text-blue-400" class="text-gray-300 hover:text-white transition whitespace-nowrap">
+            {{ 'nav.projects' | translate }}
+          </a>
+          <a routerLink="/agents" routerLinkActive="text-blue-400" class="text-gray-300 hover:text-white transition whitespace-nowrap">
+            {{ 'nav.agents' | translate }}
+          </a>
+          <a routerLink="/runs" routerLinkActive="text-blue-400" class="text-gray-300 hover:text-white transition whitespace-nowrap">
+            {{ 'nav.runs' | translate }}
+          </a>
+
+          @if (authService.isMaintainerOrAbove()) {
+            <div class="relative group">
+              <button type="button" class="text-gray-300 hover:text-white transition whitespace-nowrap flex items-center gap-1">
+                {{ 'nav.admin' | translate }}
+                <span class="text-xs">▾</span>
+              </button>
+              <div class="absolute right-0 top-full pt-2 hidden group-hover:block group-focus-within:block">
+                <div class="bg-gray-800 border border-gray-700 rounded-lg shadow-lg py-1 w-48">
+                  <a routerLink="/admin/users" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition">
+                    {{ 'nav.adminUsers' | translate }}
+                  </a>
+                  @if (authService.isOwner()) {
+                    <a routerLink="/admin/organizations" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition">
+                      {{ 'nav.adminOrganizations' | translate }}
+                    </a>
+                  }
+                  <a routerLink="/admin/secrets" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition">
+                    {{ 'nav.adminSecrets' | translate }}
+                  </a>
+                  <a routerLink="/admin/audit-log" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition">
+                    {{ 'nav.adminAuditLog' | translate }}
+                  </a>
+                </div>
+              </div>
+            </div>
           }
         </div>
+
+        <div class="flex items-center gap-3 text-sm shrink-0">
+          @if (authService.isAuthenticated()) {
+            <span class="text-gray-400 hidden sm:inline">
+              {{ authService.currentUser()?.displayName || authService.currentUser()?.email }}
+            </span>
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded text-xs bg-gray-800 border border-gray-700 hover:bg-gray-700 transition"
+              (click)="logout()"
+            >
+              {{ 'nav.logout' | translate }}
+            </button>
+          }
+
+          <div class="flex items-center gap-1 border-l border-gray-700 pl-3">
+            @for (lang of languages; track lang) {
+              <button
+                type="button"
+                class="px-2 py-1 rounded text-xs uppercase transition"
+                [class.bg-blue-600]="currentLanguage() === lang"
+                [class.text-white]="currentLanguage() === lang"
+                [class.text-gray-400]="currentLanguage() !== lang"
+                (click)="useLanguage(lang)"
+              >
+                {{ lang }}
+              </button>
+            }
+          </div>
+        </div>
       </div>
-    </div>
-  </nav>
+    </nav>
+  }
 
   <main>
     <router-outlet />
