@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.SignalR; // HubOptionsExtensions.AddFilter
 using Microsoft.IdentityModel.Tokens;
 using Npgsql; // TracerProviderBuilder.AddNpgsql (Npgsql.OpenTelemetry)
 using OpenTelemetry.Metrics;
@@ -48,7 +49,11 @@ DapperBootstrap.Configure();
 // ICallerContext exposes the *authenticated* caller's org/user/role. Authorization decisions
 // must be based on it, never on an orgId/userId taken from the request itself.
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ICallerContext, CallerContext>();
+// One instance per scope serving both roles: the hub filter binds the principal through
+// ICallerContextBinder and consumers read it back through ICallerContext.
+builder.Services.AddScoped<CallerContext>();
+builder.Services.AddScoped<ICallerContext>(sp => sp.GetRequiredService<CallerContext>());
+builder.Services.AddScoped<ICallerContextBinder>(sp => sp.GetRequiredService<CallerContext>());
 
 builder.Services.AddSingleton<IDbConnectionFactory, NpgsqlConnectionFactory>();
 builder.Services.AddSingleton(sp => new MigrationRunner(
@@ -162,7 +167,12 @@ builder.Services.AddHostedService<RunDataJanitor>();
 // AddJsonProtocol uses its own JsonSerializerOptions, separate from ConfigureHttpJsonOptions
 // below — without this, hub payloads (Run/RunEvent broadcasts) would serialize enums as
 // PascalCase while the REST API serializes them as snake_case. Keep both in sync.
-var signalR = builder.Services.AddSignalR()
+var signalR = builder.Services.AddSignalR(options =>
+    {
+        // Makes the caller's identity visible to everything a hub method calls into; see
+        // Hubs/CallerContextHubFilter.cs.
+        options.AddFilter<CallerContextHubFilter>();
+    })
     .AddHubOptions<RunHub>(options => options.MaximumReceiveMessageSize = 1_000_000)
     .AddJsonProtocol(options =>
     {

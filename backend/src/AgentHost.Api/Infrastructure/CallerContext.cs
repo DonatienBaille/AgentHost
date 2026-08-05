@@ -45,8 +45,13 @@ public static class ClaimsPrincipalExtensions
 }
 
 /// <summary>
-/// Scoped view of the current request's authenticated caller. Inject this into endpoint handlers
-/// (Minimal APIs resolve it from DI) rather than accepting an org/user id from the client.
+/// Scoped view of the current caller. Inject this into endpoint handlers (Minimal APIs resolve it
+/// from DI) rather than accepting an org/user id from the client.
+///
+/// For HTTP requests the principal comes from the ambient <see cref="IHttpContextAccessor"/>. That
+/// accessor is null during a SignalR hub method invocation — the HttpContext only exists for the
+/// initial negotiate request — so hub invocations bind their principal explicitly through
+/// <see cref="ICallerContextBinder"/>; see Hubs/CallerContextHubFilter.cs.
 /// </summary>
 public interface ICallerContext
 {
@@ -68,24 +73,41 @@ public interface ICallerContext
     bool BelongsToCallerOrg(string? orgId);
 }
 
-public class CallerContext : ICallerContext
+/// <summary>
+/// Binds the caller for entry points that have no ambient <see cref="IHttpContextAccessor"/> —
+/// today that means SignalR hub invocations. Resolve it from the *same* DI scope as the
+/// <see cref="ICallerContext"/> it is meant to populate.
+/// </summary>
+public interface ICallerContextBinder
 {
-    private readonly ClaimsPrincipal? _principal;
+    void Bind(ClaimsPrincipal? principal);
+}
+
+public class CallerContext : ICallerContext, ICallerContextBinder
+{
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private ClaimsPrincipal? _boundPrincipal;
 
     public CallerContext(IHttpContextAccessor httpContextAccessor)
     {
-        _principal = httpContextAccessor.HttpContext?.User;
+        _httpContextAccessor = httpContextAccessor;
     }
 
-    public bool IsAuthenticated => _principal?.Identity?.IsAuthenticated == true;
+    // Resolved per access rather than captured in the constructor: a hub filter binds the principal
+    // *after* this scope's services are constructed, and HttpContext is null on that path anyway.
+    private ClaimsPrincipal? Principal => _boundPrincipal ?? _httpContextAccessor.HttpContext?.User;
 
-    public string UserId => _principal.GetUserId()
+    public void Bind(ClaimsPrincipal? principal) => _boundPrincipal = principal;
+
+    public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated == true;
+
+    public string UserId => Principal.GetUserId()
         ?? throw new InvalidOperationException("No authenticated caller on this request");
 
-    public string OrgId => _principal.GetOrgId()
+    public string OrgId => Principal.GetOrgId()
         ?? throw new InvalidOperationException("No authenticated caller on this request");
 
-    public UserRole Role => _principal.GetRole()
+    public UserRole Role => Principal.GetRole()
         ?? throw new InvalidOperationException("No authenticated caller on this request");
 
     // Lower enum value = higher privilege (Owner = 0 … Viewer = 3), matching the spec's
