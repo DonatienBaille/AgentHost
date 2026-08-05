@@ -13,7 +13,14 @@ public interface IAuthService
     bool SelfRegistrationAllowed { get; }
 
     Task<AuthResponse> RegisterAsync(RegisterRequest req, CancellationToken ct = default);
-    Task<AuthResponse?> LoginAsync(LoginRequest req, CancellationToken ct = default);
+
+    /// <summary>
+    /// Verifies an email/password pair. For an account without MFA this returns a full
+    /// access+refresh pair; for one with MFA enabled it returns only a short-lived challenge token
+    /// (<c>mfaRequired: true</c>), which must be exchanged at POST /api/auth/mfa/verify. Null when
+    /// the credentials are wrong.
+    /// </summary>
+    Task<LoginResponse?> LoginAsync(LoginRequest req, CancellationToken ct = default);
 
     /// <summary>
     /// Exchanges a valid refresh token for a brand-new access+refresh pair, revoking the token
@@ -41,20 +48,26 @@ public class AuthService : IAuthService
     private readonly IOrganizationRepository _orgRepository;
     private readonly IUserRepository _userRepository;
     private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly IUserMfaRepository _mfaRepository;
     private readonly IAuthTokenIssuer _tokenIssuer;
+    private readonly IMfaChallengeTokenService _challengeTokens;
     private readonly bool _allowSelfRegistration;
 
     public AuthService(
         IOrganizationRepository orgRepository,
         IUserRepository userRepository,
         IRefreshTokenRepository refreshTokenRepository,
+        IUserMfaRepository mfaRepository,
         IAuthTokenIssuer tokenIssuer,
+        IMfaChallengeTokenService challengeTokens,
         IConfiguration config)
     {
         _orgRepository = orgRepository;
         _userRepository = userRepository;
         _refreshTokenRepository = refreshTokenRepository;
+        _mfaRepository = mfaRepository;
         _tokenIssuer = tokenIssuer;
+        _challengeTokens = challengeTokens;
 
         // Absent key => allowed, preserving the historical behaviour for deployments that have not
         // added the setting yet. appsettings.json ships it explicitly so it is discoverable.
@@ -102,14 +115,22 @@ public class AuthService : IAuthService
         return response;
     }
 
-    public async Task<AuthResponse?> LoginAsync(LoginRequest req, CancellationToken ct = default)
+    public async Task<LoginResponse?> LoginAsync(LoginRequest req, CancellationToken ct = default)
     {
         var user = await _userRepository.GetByEmailAsync(req.Email, ct);
         if (user is null || !PasswordHasher.Verify(req.Password, user.PasswordHash))
             return null;
 
+        // MFA step-up. A correct password is not, on its own, enough to get a session on an account
+        // that has enabled a second factor: no access token and no refresh token are issued here.
+        // The challenge token proves only "this password was correct just now", and the sole thing
+        // it can be exchanged for is a real pair at POST /api/auth/mfa/verify.
+        var mfa = await _mfaRepository.GetAsync(user.Id, ct);
+        if (mfa is { Enabled: true })
+            return LoginResponse.Challenge(_challengeTokens.Issue(user), _challengeTokens.LifetimeSeconds);
+
         var (response, _) = await _tokenIssuer.IssueAsync(user, ct);
-        return response;
+        return LoginResponse.Authenticated(response);
     }
 
     public async Task<AuthResponse?> RefreshAsync(string refreshToken, CancellationToken ct = default)

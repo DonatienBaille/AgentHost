@@ -203,3 +203,28 @@ public class ChangePasswordRequestValidator : AbstractValidator<ChangePasswordRe
         RuleFor(x => x.NewPassword).Password();
     }
 }
+
+public class MfaConfirmRequestValidator : AbstractValidator<MfaConfirmRequest>
+{
+    public MfaConfirmRequestValidator()
+    {
+        RuleFor(x => x.Code).NotEmpty();
+    }
+}
+
+public class MfaDisableRequestValidator : AbstractValidator<MfaDisableRequest>
+{
+    public MfaDisableRequestValidator()
+    {
+        RuleFor(x => x.Code).NotEmpty();
+    }
+}
+
+public class MfaVerifyRequestValidator : AbstractValidator<MfaVerifyRequest>
+{
+    public MfaVerifyRequestValidator()
+    {
+        RuleFor(x => x.MfaToken).NotEmpty();
+        RuleFor(x => x.Code).NotEmpty();
+    }
+}

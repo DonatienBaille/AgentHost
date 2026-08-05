@@ -115,6 +115,7 @@ builder.Services.AddScoped<IWebhookRepository, WebhookRepository>();
 builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 builder.Services.AddScoped<IInvitationRepository, InvitationRepository>();
 builder.Services.AddScoped<IPasswordResetTokenRepository, PasswordResetTokenRepository>();
+builder.Services.AddScoped<IUserMfaRepository, UserMfaRepository>();
 
 // ---- Services ----
 builder.Services.AddScoped<IRunService, RunService>();
@@ -130,9 +131,13 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAuthTokenIssuer, AuthTokenIssuer>();
 builder.Services.AddScoped<IInvitationService, InvitationService>();
 builder.Services.AddScoped<IPasswordService, PasswordService>();
+builder.Services.AddScoped<IMfaService, MfaService>();
 builder.Services.AddScoped<IWebhookDispatcher, WebhookDispatcher>();
 builder.Services.AddSingleton<IAgentManifestParser, AgentManifestParser>();
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+// Issues the MFA login-challenge token. Deliberately a different audience from the access token,
+// so the bearer scheme configured below rejects it; see Infrastructure/MfaChallengeTokenService.cs.
+builder.Services.AddSingleton<IMfaChallengeTokenService, MfaChallengeTokenService>();
 builder.Services.AddHttpClient();
 
 // ---- Validation ----

@@ -36,6 +36,18 @@ public static class AuthEndpoints
         authApi.MapPost("/password", ChangePassword).WithName("ChangePassword")
             .WithValidation<ChangePasswordRequest>().RequireAuthorization();
 
+        // ---- MFA (TOTP, RFC 6238) ----
+        // Enroll/confirm/disable act on the caller's own account. /verify is anonymous because its
+        // credential is the challenge token from login, not a session - see MfaChallengeTokenService
+        // for why that token cannot be used as an access token.
+        authApi.MapPost("/mfa/enroll", EnrollMfa).WithName("EnrollMfa").RequireAuthorization();
+        authApi.MapPost("/mfa/confirm", ConfirmMfa).WithName("ConfirmMfa")
+            .WithValidation<MfaConfirmRequest>().RequireAuthorization();
+        authApi.MapPost("/mfa/disable", DisableMfa).WithName("DisableMfa")
+            .WithValidation<MfaDisableRequest>().RequireAuthorization();
+        authApi.MapPost("/mfa/verify", VerifyMfa).WithName("VerifyMfa")
+            .WithValidation<MfaVerifyRequest>().AllowAnonymous();
+
         return app;
     }
 
@@ -58,6 +70,12 @@ public static class AuthEndpoints
         }
     }
 
+    /// <summary>
+    /// Verifies email + password. For an account with MFA enabled the response carries
+    /// <c>mfaRequired: true</c> and a short-lived <c>mfaToken</c> instead of a session - the
+    /// password alone never yields a usable access or refresh token in that case. Exchange the
+    /// challenge at POST /api/auth/mfa/verify.
+    /// </summary>
     private static async Task<IResult> Login(LoginRequest req, IAuthService authService, CancellationToken ct)
     {
         var result = await authService.LoginAsync(req, ct);
@@ -142,6 +160,72 @@ public static class AuthEndpoints
         return result is not null
             ? Results.Ok(result)
             : Results.BadRequest(new { error = "Current password is incorrect" });
+    }
+
+    /// <summary>
+    /// Generates a new TOTP secret for the caller and returns it base32-encoded plus an
+    /// <c>otpauth://</c> URI for QR rendering. The enrollment is inert until
+    /// POST /api/auth/mfa/confirm proves the authenticator was set up correctly - that two-step
+    /// shape is what stops a mis-scanned code from locking the user out. Calling this again
+    /// replaces any pending (or existing) enrollment.
+    /// </summary>
+    private static async Task<IResult> EnrollMfa(
+        IMfaService mfaService, IUserRepository userRepository, ICallerContext caller, CancellationToken ct)
+    {
+        var user = await userRepository.GetAsync(caller.UserId, ct);
+        if (user is null) return Results.NotFound();
+
+        return Results.Ok(await mfaService.EnrollAsync(user, ct));
+    }
+
+    /// <summary>
+    /// Confirms an enrollment with a live code, enabling MFA for the caller and returning their
+    /// recovery codes <b>once</b> - only hashes are stored, so they cannot be shown again.
+    /// </summary>
+    private static async Task<IResult> ConfirmMfa(
+        MfaConfirmRequest req, IMfaService mfaService, IUserRepository userRepository,
+        ICallerContext caller, CancellationToken ct)
+    {
+        var user = await userRepository.GetAsync(caller.UserId, ct);
+        if (user is null) return Results.NotFound();
+
+        var result = await mfaService.ConfirmAsync(user, req.Code, ct);
+        return result is not null
+            ? Results.Ok(result)
+            : Results.BadRequest(new { error = "Code is invalid or there is no pending MFA enrollment" });
+    }
+
+    /// <summary>
+    /// Turns MFA off for the caller. Requires a current TOTP code or an unused recovery code: an
+    /// access token alone must not be enough to strip the second factor, or a stolen token would
+    /// undo the very protection it is supposed to be subject to.
+    /// </summary>
+    private static async Task<IResult> DisableMfa(
+        MfaDisableRequest req, IMfaService mfaService, IUserRepository userRepository,
+        ICallerContext caller, CancellationToken ct)
+    {
+        var user = await userRepository.GetAsync(caller.UserId, ct);
+        if (user is null) return Results.NotFound();
+
+        var disabled = await mfaService.DisableAsync(user, req.Code, ct);
+        return disabled
+            ? Results.NoContent()
+            : Results.BadRequest(new { error = "Code is invalid or MFA is not enabled" });
+    }
+
+    /// <summary>
+    /// Second step of an MFA login: exchanges the challenge token from /api/auth/login plus a TOTP
+    /// code (or a recovery code) for the real access+refresh pair. Anonymous, because the caller
+    /// has no session yet - the challenge token is the credential, and it is accepted here and
+    /// nowhere else.
+    ///
+    /// Every failure is the same flat 401: bad token, expired token, wrong code, spent recovery
+    /// code. A recovery code is consumed on use and cannot be replayed.
+    /// </summary>
+    private static async Task<IResult> VerifyMfa(MfaVerifyRequest req, IMfaService mfaService, CancellationToken ct)
+    {
+        var result = await mfaService.VerifyChallengeAsync(req.MfaToken, req.Code, ct);
+        return result is not null ? Results.Ok(result) : Results.Unauthorized();
     }
 
     private static async Task<IResult> Me(ICallerContext caller, IUserRepository userRepository, CancellationToken ct)
