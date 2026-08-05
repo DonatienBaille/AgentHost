@@ -46,6 +46,9 @@ services:
       Docker__Host: unix:///var/run/docker.sock
       Docker__WorkspacePath: /var/agenthost/runs
       Cors__AllowedOrigins__0: http://localhost:4200
+      # Dev-only AES-256 key (32 bytes, base64) so encrypted secrets survive container
+      # restarts. Generate your own for any non-throwaway environment.
+      Secrets__EncryptionKey: "5ijlcr2IxwxqH7PEwsUIGQSvbZ/w6EMuOk3mXorL54c="
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - ./runs:/var/agenthost/runs
