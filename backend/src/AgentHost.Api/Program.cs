@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using AgentHost.Api.Endpoints;
 using AgentHost.Api.Hubs;
 using AgentHost.Api.Infrastructure;
@@ -8,6 +9,7 @@ using AgentHost.Api.Services;
 using Docker.DotNet;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Serilog.Formatting.Compact;
@@ -97,8 +99,10 @@ builder.Services.AddScoped<RunStateMachine>();
 builder.Services.AddScoped<ISecretsBroker, SecretsBroker>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IWebhookDispatcher, WebhookDispatcher>();
 builder.Services.AddSingleton<IAgentManifestParser, AgentManifestParser>();
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+builder.Services.AddHttpClient();
 
 // ---- Validation ----
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
@@ -193,6 +197,20 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 builder.Services.AddEndpointsApiExplorer();
 
+// ---- Rate limiting: 120 requests/minute per authenticated user (falls back to client IP) ----
+builder.Services.AddRateLimiter(options =>
+{
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ctx.User.Identity?.Name ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.OnRejected = (ctx, ct) =>
+    {
+        ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        return ValueTask.CompletedTask;
+    };
+});
+
 var app = builder.Build();
 
 // ---- Startup migrations (idempotent; see Infrastructure/MigrationRunner) ----
@@ -214,6 +232,7 @@ app.UseCors("Frontend");
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapHub<RunHub>("/hubs/run").RequireAuthorization();
 app.MapHub<ProjectHub>("/hubs/project").RequireAuthorization();
@@ -222,6 +241,8 @@ app.MapHub<AgentMemoryHub>("/hubs/memory").RequireAuthorization();
 app.MapAuthEndpoints();
 app.MapRunEndpoints();
 app.MapAgentEndpoints();
+app.MapAgentVersionEndpoints();
+app.MapArtifactEndpoints();
 app.MapProjectEndpoints();
 app.MapApprovalEndpoints();
 app.MapMemoryEndpoints();
@@ -231,7 +252,7 @@ app.MapUserEndpoints();
 app.MapAuditEndpoints();
 app.MapSecretEndpoints();
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous().DisableRateLimiting();
 
 app.Run();
 
