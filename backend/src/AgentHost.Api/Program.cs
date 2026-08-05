@@ -99,8 +99,21 @@ builder.Services.AddSingleton<IAgentManifestParser, AgentManifestParser>();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // ---- SignalR ----
+// AddJsonProtocol uses its own JsonSerializerOptions, separate from ConfigureHttpJsonOptions
+// below — without this, hub payloads (Run/RunEvent broadcasts) would serialize enums as
+// PascalCase while the REST API serializes them as snake_case. Keep both in sync.
 builder.Services.AddSignalR()
-    .AddHubOptions<RunHub>(options => options.MaximumReceiveMessageSize = 1_000_000);
+    .AddHubOptions<RunHub>(options => options.MaximumReceiveMessageSize = 1_000_000)
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.Converters.Add(new RunStatusJsonConverter());
+        options.PayloadSerializerOptions.Converters.Add(new AgentTypeJsonConverter());
+        options.PayloadSerializerOptions.Converters.Add(new TriggeredByTypeJsonConverter());
+        options.PayloadSerializerOptions.Converters.Add(new ApprovalTypeJsonConverter());
+        options.PayloadSerializerOptions.Converters.Add(new ApprovalStatusJsonConverter());
+        options.PayloadSerializerOptions.Converters.Add(new SecretScopeJsonConverter());
+        options.PayloadSerializerOptions.Converters.Add(new UserRoleJsonConverter());
+    });
 
 // ---- CORS ----
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
@@ -120,7 +133,16 @@ builder.Services.AddCors(options =>
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    // Enums serialize as the same lowercase/snake_case strings as the DB and the documented
+    // API contract (e.g. RunStatus "awaiting_approval"), not System.Text.Json's default
+    // PascalCase member names — see Infrastructure/EnumJsonConverters.cs.
+    options.SerializerOptions.Converters.Add(new RunStatusJsonConverter());
+    options.SerializerOptions.Converters.Add(new AgentTypeJsonConverter());
+    options.SerializerOptions.Converters.Add(new TriggeredByTypeJsonConverter());
+    options.SerializerOptions.Converters.Add(new ApprovalTypeJsonConverter());
+    options.SerializerOptions.Converters.Add(new ApprovalStatusJsonConverter());
+    options.SerializerOptions.Converters.Add(new SecretScopeJsonConverter());
+    options.SerializerOptions.Converters.Add(new UserRoleJsonConverter());
 });
 
 builder.Services.AddEndpointsApiExplorer();

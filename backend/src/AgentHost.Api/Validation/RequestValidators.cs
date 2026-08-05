@@ -7,7 +7,6 @@ public class CreateRunRequestValidator : AbstractValidator<CreateRunRequest>
 {
     public CreateRunRequestValidator()
     {
-        RuleFor(x => x.ProjectId).NotEmpty();
         RuleFor(x => x.AgentId).NotEmpty();
         RuleFor(x => x.BudgetMaxUsd).GreaterThan(0).When(x => x.BudgetMaxUsd.HasValue);
     }

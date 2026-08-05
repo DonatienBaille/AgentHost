@@ -68,8 +68,6 @@ public class RunService : IRunService
     {
         if (string.IsNullOrEmpty(req.AgentId))
             throw new ArgumentException("AgentId required");
-        if (string.IsNullOrEmpty(req.ProjectId))
-            throw new ArgumentException("ProjectId required");
 
         var agent = await _agentService.GetAsync(req.AgentId, ct)
             ?? throw new KeyNotFoundException($"Agent {req.AgentId} not found");
@@ -77,18 +75,21 @@ public class RunService : IRunService
         if (string.IsNullOrEmpty(agent.CurrentVersionId))
             throw new InvalidOperationException($"Agent {req.AgentId} has no published version");
 
-        var project = await _projectRepository.GetAsync(req.ProjectId, ct)
-            ?? throw new KeyNotFoundException($"Project {req.ProjectId} not found");
+        // The agent already belongs to exactly one project — derive it rather than trusting
+        // (or requiring) the caller to pass a redundant projectId that could disagree with it.
+        var projectId = agent.ProjectId;
+        var project = await _projectRepository.GetAsync(projectId, ct)
+            ?? throw new KeyNotFoundException($"Project {projectId} not found");
 
         var manifest = _manifestParser.Parse(agent.ManifestYaml);
-        var number = await _runRepository.GetNextRunNumberAsync(req.ProjectId, ct);
+        var number = await _runRepository.GetNextRunNumberAsync(projectId, ct);
 
         var now = DateTime.UtcNow;
         var run = new Run
         {
             Id = UlidGenerator.NewUlid(),
             OrgId = project.OrgId,
-            ProjectId = req.ProjectId,
+            ProjectId = projectId,
             Number = number,
             AgentId = req.AgentId,
             AgentVersionId = agent.CurrentVersionId,

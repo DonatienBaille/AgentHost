@@ -5,7 +5,6 @@ namespace AgentHost.Api.Contracts;
 
 public class CreateRunRequest
 {
-    public string ProjectId { get; set; } = string.Empty;
     public string AgentId { get; set; } = string.Empty;
     public JsonNode? Inputs { get; set; }
     public JsonNode? Context { get; set; }
