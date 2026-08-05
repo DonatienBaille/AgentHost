@@ -90,13 +90,14 @@ public static class TestData
     /// them, returning their bearer token.
     /// </summary>
     public static async Task<(string Token, User User)> CreateUserWithRoleAsync(
-        HttpClient ownerClient, string orgId, UserRole role, string? suffix = null)
+        HttpClient ownerClient, UserRole role, string? suffix = null)
     {
         suffix ??= Suffix();
         var email = $"{role.ToString().ToLowerInvariant()}-{suffix}@example.com";
+        // No OrgId in the contract any more: the new user lands in the *caller's* org, taken
+        // from the owner client's JWT.
         var createReq = new CreateUserRequest
         {
-            OrgId = orgId,
             Email = email,
             Password = DefaultPassword,
             DisplayName = $"Test {role}",
@@ -112,12 +113,11 @@ public static class TestData
         return (auth!.Token, auth.User);
     }
 
-    public static async Task<Project> CreateProjectAsync(HttpClient client, string orgId, string? suffix = null)
+    public static async Task<Project> CreateProjectAsync(HttpClient client, string? suffix = null)
     {
         suffix ??= Suffix();
         var req = new CreateProjectRequest
         {
-            OrgId = orgId,
             Name = $"Test Project {suffix}",
             Slug = $"test-project-{suffix}",
             Description = "Integration test project",
@@ -152,12 +152,11 @@ public static class TestData
             hardMaxUsd: 10
         """;
 
-    public static async Task<Agent> CreateAgentAsync(HttpClient client, string orgId, string projectId, string? suffix = null)
+    public static async Task<Agent> CreateAgentAsync(HttpClient client, string projectId, string? suffix = null)
     {
         suffix ??= Suffix();
         var req = new CreateAgentRequest
         {
-            OrgId = orgId,
             ProjectId = projectId,
             Name = $"Test Agent {suffix}",
             Slug = $"test-agent-{suffix}",
@@ -179,8 +178,8 @@ public static class TestData
         var bootstrapClient = factory.CreateClient();
         var auth = await RegisterAsync(bootstrapClient, suffix);
         var client = AuthedClient(factory, auth.Token);
-        var project = await CreateProjectAsync(client, auth.User.OrgId, suffix);
-        var agent = await CreateAgentAsync(client, auth.User.OrgId, project.Id, suffix);
+        var project = await CreateProjectAsync(client, suffix);
+        var agent = await CreateAgentAsync(client, project.Id, suffix);
         return (client, auth, project, agent);
     }
 }

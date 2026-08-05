@@ -11,12 +11,21 @@ namespace AgentHost.Api.Services;
 
 public interface IAgentService
 {
+    /// <summary>
+    /// Unscoped lookup — for the run executor, which resolves the agent of a run whose caller was
+    /// already authorized, from a background scope with no caller org. Request handlers must use
+    /// the org-scoped overload.
+    /// </summary>
     Task<Agent?> GetAsync(string id, CancellationToken ct = default);
-    Task<List<Agent>> ListAsync(CancellationToken ct = default);
-    Task<List<Agent>> ListByProjectAsync(string projectId, CancellationToken ct = default);
-    Task<Agent> CreateAsync(CreateAgentRequest req, CancellationToken ct = default);
-    Task<Agent?> UpdateAsync(string id, UpdateAgentRequest req, CancellationToken ct = default);
-    Task<bool> DeleteAsync(string id, CancellationToken ct = default);
+
+    /// <summary>Org-scoped lookup: returns null (=&gt; 404, never 403) for another tenant's agent.</summary>
+    Task<Agent?> GetAsync(string id, string orgId, CancellationToken ct = default);
+
+    Task<List<Agent>> ListByOrgAsync(string orgId, CancellationToken ct = default);
+    Task<List<Agent>> ListByProjectAsync(string projectId, string orgId, CancellationToken ct = default);
+    Task<Agent> CreateAsync(CreateAgentRequest req, string orgId, CancellationToken ct = default);
+    Task<Agent?> UpdateAsync(string id, string orgId, UpdateAgentRequest req, CancellationToken ct = default);
+    Task<bool> DeleteAsync(string id, string orgId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -44,14 +53,18 @@ public class AgentService : IAgentService
 
     public Task<Agent?> GetAsync(string id, CancellationToken ct = default) => _agentRepository.GetAsync(id, ct);
 
-    public Task<List<Agent>> ListAsync(CancellationToken ct = default) => _agentRepository.ListAsync(ct);
+    public Task<Agent?> GetAsync(string id, string orgId, CancellationToken ct = default) =>
+        _agentRepository.GetAsync(id, orgId, ct);
 
-    public Task<List<Agent>> ListByProjectAsync(string projectId, CancellationToken ct = default) =>
-        _agentRepository.ListByProjectAsync(projectId, ct);
+    public Task<List<Agent>> ListByOrgAsync(string orgId, CancellationToken ct = default) =>
+        _agentRepository.ListByOrgAsync(orgId, ct);
 
-    public async Task<Agent> CreateAsync(CreateAgentRequest req, CancellationToken ct = default)
+    public Task<List<Agent>> ListByProjectAsync(string projectId, string orgId, CancellationToken ct = default) =>
+        _agentRepository.ListByProjectAsync(projectId, orgId, ct);
+
+    public async Task<Agent> CreateAsync(CreateAgentRequest req, string orgId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(req.OrgId)) throw new ArgumentException("OrgId required");
+        if (string.IsNullOrWhiteSpace(orgId)) throw new ArgumentException("OrgId required");
         if (string.IsNullOrWhiteSpace(req.ProjectId)) throw new ArgumentException("ProjectId required");
         if (string.IsNullOrWhiteSpace(req.ManifestYaml)) throw new ArgumentException("ManifestYaml required");
 
@@ -68,7 +81,7 @@ public class AgentService : IAgentService
         var agent = new Agent
         {
             Id = UlidGenerator.NewUlid(),
-            OrgId = req.OrgId,
+            OrgId = orgId,
             ProjectId = req.ProjectId,
             Name = name,
             Slug = slug,
@@ -108,9 +121,9 @@ public class AgentService : IAgentService
         return agent;
     }
 
-    public async Task<Agent?> UpdateAsync(string id, UpdateAgentRequest req, CancellationToken ct = default)
+    public async Task<Agent?> UpdateAsync(string id, string orgId, UpdateAgentRequest req, CancellationToken ct = default)
     {
-        var agent = await _agentRepository.GetAsync(id, ct);
+        var agent = await _agentRepository.GetAsync(id, orgId, ct);
         if (agent is null) return null;
 
         if (req.Name is not null) agent.Name = req.Name;
@@ -120,12 +133,12 @@ public class AgentService : IAgentService
         return agent;
     }
 
-    public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(string id, string orgId, CancellationToken ct = default)
     {
-        var agent = await _agentRepository.GetAsync(id, ct);
+        var agent = await _agentRepository.GetAsync(id, orgId, ct);
         if (agent is null) return false;
 
-        await _agentRepository.SoftDeleteAsync(id, ct);
+        await _agentRepository.SoftDeleteAsync(id, orgId, ct);
         return true;
     }
 

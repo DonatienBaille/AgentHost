@@ -34,7 +34,6 @@ public class CreateAgentRequestValidator : AbstractValidator<CreateAgentRequest>
 {
     public CreateAgentRequestValidator()
     {
-        RuleFor(x => x.OrgId).NotEmpty();
         RuleFor(x => x.ProjectId).NotEmpty();
         RuleFor(x => x.ManifestYaml).NotEmpty();
     }
@@ -52,7 +51,6 @@ public class CreateProjectRequestValidator : AbstractValidator<CreateProjectRequ
 {
     public CreateProjectRequestValidator()
     {
-        RuleFor(x => x.OrgId).NotEmpty();
         RuleFor(x => x.Name).NotEmpty();
         RuleFor(x => x.Slug).NotEmpty().Matches("^[a-z0-9-]+$")
             .WithMessage("Slug must be lowercase alphanumeric with dashes");
@@ -95,9 +93,8 @@ public class CreateUserRequestValidator : AbstractValidator<CreateUserRequest>
 {
     public CreateUserRequestValidator()
     {
-        RuleFor(x => x.OrgId).NotEmpty();
         RuleFor(x => x.Email).NotEmpty().EmailAddress();
-        RuleFor(x => x.Password).NotEmpty().MinimumLength(8);
+        RuleFor(x => x.Password).Password();
     }
 }
 
@@ -109,7 +106,7 @@ public class RegisterRequestValidator : AbstractValidator<RegisterRequest>
         RuleFor(x => x.OrgSlug).NotEmpty().Matches("^[a-z0-9-]+$")
             .WithMessage("Slug must be lowercase alphanumeric with dashes");
         RuleFor(x => x.Email).NotEmpty().EmailAddress();
-        RuleFor(x => x.Password).NotEmpty().MinimumLength(8);
+        RuleFor(x => x.Password).Password();
     }
 }
 
@@ -126,8 +123,32 @@ public class CreateSecretRequestValidator : AbstractValidator<CreateSecretReques
 {
     public CreateSecretRequestValidator()
     {
-        RuleFor(x => x.OrgId).NotEmpty();
         RuleFor(x => x.Name).NotEmpty();
         RuleFor(x => x.Value).NotEmpty();
+    }
+}
+
+public class UpdateSecretRequestValidator : AbstractValidator<UpdateSecretRequest>
+{
+    public UpdateSecretRequestValidator()
+    {
+        RuleFor(x => x.Value).NotEmpty();
+    }
+}
+
+/// <summary>A password change through PUT /api/users/{id} must clear the same bar as signup.</summary>
+public class UpdateUserRequestValidator : AbstractValidator<UpdateUserRequest>
+{
+    public UpdateUserRequestValidator()
+    {
+        RuleFor(x => x.Password!).Password().When(x => !string.IsNullOrEmpty(x.Password));
+    }
+}
+
+public class RefreshRequestValidator : AbstractValidator<RefreshRequest>
+{
+    public RefreshRequestValidator()
+    {
+        RuleFor(x => x.RefreshToken).NotEmpty();
     }
 }

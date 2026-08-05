@@ -7,13 +7,18 @@ namespace AgentHost.Api.Repositories;
 
 public interface ISecretRepository
 {
-    Task<Secret?> GetAsync(string id, CancellationToken ct = default);
+    /// <summary>Org-scoped lookup: returns null (=&gt; 404, never 403) for another tenant's secret.</summary>
+    Task<Secret?> GetAsync(string id, string orgId, CancellationToken ct = default);
+
+    /// <summary>Org-scoped metadata listing. Callers must project away the ciphertext before responding.</summary>
+    Task<List<Secret>> ListByOrgAsync(string orgId, int skip = 0, int take = 200, CancellationToken ct = default);
+
     Task<Secret?> GetByNameAsync(string orgId, string name, CancellationToken ct = default);
     Task<List<Secret>> ListForScopeAsync(string orgId, string? projectId, IEnumerable<string> names, CancellationToken ct = default);
     Task InsertAsync(Secret secret, CancellationToken ct = default);
     Task UpdateAsync(Secret secret, CancellationToken ct = default);
     Task MarkUsedAsync(string id, string runId, CancellationToken ct = default);
-    Task SoftDeleteAsync(string id, CancellationToken ct = default);
+    Task SoftDeleteAsync(string id, string orgId, CancellationToken ct = default);
 }
 
 public class SecretRepository : ISecretRepository
@@ -32,11 +37,27 @@ public class SecretRepository : ISecretRepository
         _logger = logger;
     }
 
-    public async Task<Secret?> GetAsync(string id, CancellationToken ct = default)
+    public async Task<Secret?> GetAsync(string id, string orgId, CancellationToken ct = default)
     {
-        var sql = $"SELECT {SelectColumns} FROM secrets WHERE id = @Id AND deleted_at IS NULL";
+        var sql = $"SELECT {SelectColumns} FROM secrets WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL";
         using var db = _connectionFactory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<Secret>(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        return await db.QueryFirstOrDefaultAsync<Secret>(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
+    }
+
+    public async Task<List<Secret>> ListByOrgAsync(string orgId, int skip = 0, int take = 200, CancellationToken ct = default)
+    {
+        var sql = $"""
+            SELECT {SelectColumns} FROM secrets
+            WHERE org_id = @OrgId AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT @Take OFFSET @Skip
+            """;
+        using var db = _connectionFactory.CreateConnection();
+        var rows = await db.QueryAsync<Secret>(new CommandDefinition(
+            sql,
+            new { OrgId = orgId, Skip = Paging.ClampSkip(skip), Take = Paging.ClampTake(take) },
+            cancellationToken: ct));
+        return rows.ToList();
     }
 
     public async Task<Secret?> GetByNameAsync(string orgId, string name, CancellationToken ct = default)
@@ -91,7 +112,7 @@ public class SecretRepository : ISecretRepository
                 vault_path = @VaultPath,
                 digest_sha256_truncated = @DigestSha256Truncated,
                 updated_at = @UpdatedAt
-            WHERE id = @Id
+            WHERE id = @Id AND org_id = @OrgId AND deleted_at IS NULL
             """;
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, secret, cancellationToken: ct));
@@ -109,11 +130,11 @@ public class SecretRepository : ISecretRepository
         await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id, RunId = runId }, cancellationToken: ct));
     }
 
-    public async Task SoftDeleteAsync(string id, CancellationToken ct = default)
+    public async Task SoftDeleteAsync(string id, string orgId, CancellationToken ct = default)
     {
-        const string sql = "UPDATE secrets SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id";
+        const string sql = "UPDATE secrets SET deleted_at = NOW(), updated_at = NOW() WHERE id = @Id AND org_id = @OrgId";
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id, OrgId = orgId }, cancellationToken: ct));
         _logger.Information("Soft-deleted secret {SecretId}", id);
     }
 }

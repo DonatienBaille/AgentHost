@@ -9,11 +9,15 @@ namespace AgentHost.Api.Tests.Integration;
 
 /// <summary>
 /// One create -&gt; update -&gt; verify -&gt; delete -&gt; verify-gone round trip per resource for the
-/// newly-added CRUD endpoints on organizations, users, agents and secrets. Each repository's
-/// actual delete semantics is matched rather than assumed: organizations/users/agents/secrets use
-/// soft delete (deleted_at, filtered out of GetAsync), which these tests confirm by asserting
-/// GET returns 404 after DELETE. (Webhooks use a hard DELETE and get their own CRUD coverage in
+/// CRUD endpoints on organizations, users, agents and secrets. Each repository's actual delete
+/// semantics is matched rather than assumed: organizations/users/agents/secrets use soft delete
+/// (deleted_at, filtered out of every read), which these tests confirm by asserting GET returns
+/// 404 after DELETE. (Webhooks use a hard DELETE and get their own CRUD coverage in
 /// WebhookEndpointsTests, alongside the dispatch-signature test.)
+///
+/// Note the organization round trip operates on the caller's *own* org: reads, updates and deletes
+/// are scoped to the organization in the caller's JWT, so an org they merely created (and cannot
+/// authenticate into) is deliberately invisible to them — asserted below.
 /// </summary>
 [Collection(IntegrationCollection.Name)]
 public class CrudEndpointsTests
@@ -23,13 +27,15 @@ public class CrudEndpointsTests
     public CrudEndpointsTests(AgentHostApiFactory factory) => _factory = factory;
 
     [Fact]
-    public async Task Organization_CreateUpdateDelete_RoundTrips()
+    public async Task Organization_UpdateDeleteOwnOrg_RoundTrips()
     {
         var suffix = TestData.Suffix();
         var bootstrap = _factory.CreateClient();
         var owner = await TestData.RegisterAsync(bootstrap, suffix);
         var client = TestData.AuthedClient(_factory, owner.Token);
+        var ownOrgId = owner.User.OrgId;
 
+        // An owner may still provision an additional organization...
         var createResponse = await client.PostJsonAsync("/api/organizations", new CreateOrganizationRequest
         {
             Name = $"Crud Org {suffix}",
@@ -37,10 +43,21 @@ public class CrudEndpointsTests
             Plan = "free",
         });
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
-        var org = await createResponse.Content.ReadFromJsonAsync<Organization>(TestJson.Options);
-        Assert.NotNull(org);
+        var otherOrg = await createResponse.Content.ReadFromJsonAsync<Organization>(TestJson.Options);
+        Assert.NotNull(otherOrg);
 
-        var updateResponse = await client.PutJsonAsync($"/api/organizations/{org!.Id}", new UpdateOrganizationRequest
+        // ...but their token is scoped to their own org, so the new one is not readable by them.
+        var otherGetResponse = await client.GetAsync($"/api/organizations/{otherOrg!.Id}");
+        Assert.Equal(HttpStatusCode.NotFound, otherGetResponse.StatusCode);
+
+        // GET / returns exactly the caller's own organization, never the whole tenant roster.
+        var listResponse = await client.GetAsync("/api/organizations");
+        Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+        var list = await listResponse.Content.ReadFromJsonAsync<List<Organization>>(TestJson.Options);
+        Assert.NotNull(list);
+        Assert.Equal(ownOrgId, Assert.Single(list!).Id);
+
+        var updateResponse = await client.PutJsonAsync($"/api/organizations/{ownOrgId}", new UpdateOrganizationRequest
         {
             Name = $"Crud Org {suffix} Renamed",
             Plan = "team",
@@ -50,17 +67,65 @@ public class CrudEndpointsTests
         Assert.Equal($"Crud Org {suffix} Renamed", updated!.Name);
         Assert.Equal("team", updated.Plan);
 
-        var getResponse = await client.GetAsync($"/api/organizations/{org.Id}");
+        var getResponse = await client.GetAsync($"/api/organizations/{ownOrgId}");
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
         var fetched = await getResponse.Content.ReadFromJsonAsync<Organization>(TestJson.Options);
         Assert.Equal($"Crud Org {suffix} Renamed", fetched!.Name);
         Assert.Equal("team", fetched.Plan);
 
-        var deleteResponse = await client.DeleteAsync($"/api/organizations/{org.Id}");
+        var deleteResponse = await client.DeleteAsync($"/api/organizations/{ownOrgId}");
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
-        var afterDeleteResponse = await client.GetAsync($"/api/organizations/{org.Id}");
+        var afterDeleteResponse = await client.GetAsync($"/api/organizations/{ownOrgId}");
         Assert.Equal(HttpStatusCode.NotFound, afterDeleteResponse.StatusCode);
+    }
+
+    /// <summary>
+    /// Deleting an organization must cascade: its projects/agents/runs stop being readable too,
+    /// rather than being orphaned but still live (the GDPR-erasure gap this replaces).
+    /// </summary>
+    [Fact]
+    public async Task DeleteOrganization_CascadesToProjectsAgentsAndRuns()
+    {
+        var suffix = TestData.Suffix();
+        var (client, owner, project, agent) = await TestData.CreateFullFixtureAsync(_factory, suffix);
+
+        var runResponse = await client.PostJsonAsync("/api/runs", new CreateRunRequest { AgentId = agent.Id });
+        Assert.Equal(HttpStatusCode.Created, runResponse.StatusCode);
+        var run = await runResponse.Content.ReadFromJsonAsync<Run>(TestJson.Options);
+        Assert.NotNull(run);
+
+        // Sanity: everything is readable before the delete.
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/projects/{project.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/agents/{agent.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/runs/{run!.Id}")).StatusCode);
+
+        var deleteResponse = await client.DeleteAsync($"/api/organizations/{owner.User.OrgId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/projects/{project.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/agents/{agent.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/runs/{run.Id}")).StatusCode);
+    }
+
+    /// <summary>Deleting a project cascades to the agents and runs beneath it.</summary>
+    [Fact]
+    public async Task DeleteProject_CascadesToAgentsAndRuns()
+    {
+        var suffix = TestData.Suffix();
+        var (client, _, project, agent) = await TestData.CreateFullFixtureAsync(_factory, suffix);
+
+        var runResponse = await client.PostJsonAsync("/api/runs", new CreateRunRequest { AgentId = agent.Id });
+        Assert.Equal(HttpStatusCode.Created, runResponse.StatusCode);
+        var run = await runResponse.Content.ReadFromJsonAsync<Run>(TestJson.Options);
+        Assert.NotNull(run);
+
+        var deleteResponse = await client.DeleteAsync($"/api/projects/{project.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/projects/{project.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/agents/{agent.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/runs/{run!.Id}")).StatusCode);
     }
 
     [Fact]
@@ -71,9 +136,9 @@ public class CrudEndpointsTests
         var owner = await TestData.RegisterAsync(bootstrap, suffix);
         var client = TestData.AuthedClient(_factory, owner.Token);
 
+        // CreateUserRequest no longer carries an OrgId — the new user lands in the caller's org.
         var createResponse = await client.PostJsonAsync("/api/users", new CreateUserRequest
         {
-            OrgId = owner.User.OrgId,
             Email = $"crud-user-{suffix}@example.com",
             Password = TestData.DefaultPassword,
             DisplayName = "Original Name",
@@ -83,6 +148,7 @@ public class CrudEndpointsTests
         var user = await createResponse.Content.ReadFromJsonAsync<User>(TestJson.Options);
         Assert.NotNull(user);
         Assert.Equal(UserRole.Viewer, user!.Role);
+        Assert.Equal(owner.User.OrgId, user.OrgId);
 
         var updateResponse = await client.PutJsonAsync($"/api/users/{user.Id}", new UpdateUserRequest
         {
@@ -134,41 +200,64 @@ public class CrudEndpointsTests
     }
 
     /// <summary>
-    /// Secrets have no GET-by-id or PUT endpoint (SecretEndpoints only maps POST / and DELETE
-    /// /{id}) — see final report. This confirms what IS there: create, then soft-delete via
-    /// DELETE, then a second DELETE 404s because DeleteSecret's own GetAsync lookup now excludes
-    /// the soft-deleted row (deleted_at IS NULL filter), which is the only externally observable
-    /// evidence of the soft delete without a GET endpoint to check directly.
+    /// Full secret CRUD, including the GET list/by-id routes the admin UI needs. The critical
+    /// assertion is negative: no response on any route may carry the plaintext or the ciphertext.
     /// </summary>
     [Fact]
-    public async Task Secret_CreateThenDelete_SecondDeleteIsNotFound()
+    public async Task Secret_CreateListGetRotateDelete_NeverExposesValue()
     {
         var suffix = TestData.Suffix();
         var bootstrap = _factory.CreateClient();
         var owner = await TestData.RegisterAsync(bootstrap, suffix);
         var client = TestData.AuthedClient(_factory, owner.Token);
 
+        const string plaintext = "super-secret-plaintext-value";
         var createResponse = await client.PostJsonAsync("/api/secrets", new CreateSecretRequest
         {
-            OrgId = owner.User.OrgId,
             Name = $"crud-secret-{suffix}",
-            Value = "super-secret-plaintext-value",
+            Value = plaintext,
             Scope = SecretScope.Org,
         });
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
 
-        using var doc = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var createBody = await createResponse.Content.ReadAsStringAsync();
+        AssertNoSecretMaterial(createBody, plaintext);
+        using var doc = JsonDocument.Parse(createBody);
         var secretId = doc.RootElement.GetProperty("id").GetString();
         Assert.False(string.IsNullOrEmpty(secretId));
 
-        // The create response must never echo the plaintext or ciphertext back.
-        Assert.False(doc.RootElement.TryGetProperty("value", out _));
-        Assert.False(doc.RootElement.TryGetProperty("encryptedValue", out _));
+        // GET /api/secrets — the list endpoint the Angular admin page calls (previously a 404).
+        var listResponse = await client.GetAsync("/api/secrets");
+        Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+        var listBody = await listResponse.Content.ReadAsStringAsync();
+        AssertNoSecretMaterial(listBody, plaintext);
+        var list = await listResponse.Content.ReadFromJsonAsync<List<SecretResponse>>(TestJson.Options);
+        Assert.NotNull(list);
+        Assert.Contains(list!, s => s.Id == secretId);
+        Assert.All(list!, s => Assert.Equal(owner.User.OrgId, s.OrgId));
+
+        // GET /api/secrets/{id} — metadata only.
+        var getResponse = await client.GetAsync($"/api/secrets/{secretId}");
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+        AssertNoSecretMaterial(await getResponse.Content.ReadAsStringAsync(), plaintext);
+
+        // PUT rotates the stored value without ever echoing it.
+        const string rotated = "rotated-plaintext-value";
+        var rotateResponse = await client.PutJsonAsync($"/api/secrets/{secretId}", new UpdateSecretRequest { Value = rotated });
+        Assert.Equal(HttpStatusCode.OK, rotateResponse.StatusCode);
+        AssertNoSecretMaterial(await rotateResponse.Content.ReadAsStringAsync(), rotated);
 
         var deleteResponse = await client.DeleteAsync($"/api/secrets/{secretId}");
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
-        var secondDeleteResponse = await client.DeleteAsync($"/api/secrets/{secretId}");
-        Assert.Equal(HttpStatusCode.NotFound, secondDeleteResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/secrets/{secretId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/secrets/{secretId}")).StatusCode);
+    }
+
+    private static void AssertNoSecretMaterial(string body, string plaintext)
+    {
+        Assert.DoesNotContain(plaintext, body, StringComparison.Ordinal);
+        Assert.DoesNotContain("encryptedValue", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("vaultPath", body, StringComparison.OrdinalIgnoreCase);
     }
 }

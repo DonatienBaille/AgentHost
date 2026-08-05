@@ -300,12 +300,16 @@ public static class AgentProtocolEndpoints
     {
         if (BindRun(runId, principal) is { } denied) return denied;
 
-        var approval = await approvalRepository.GetAsync(approvalId, ct);
+        // There is no human caller on this path — the agent is authenticated by its run token — so
+        // the org to scope by comes from the run the token names, not from ICallerContext.
+        var run = await runRepository.GetAsync(runId, ct);
+        if (run is null) return Results.NotFound();
+
+        var approval = await approvalRepository.GetAsync(approvalId, run.OrgId, ct);
         // Guard the cross-run case explicitly: an approval id belonging to another run must not be
         // readable just because the caller happens to hold a valid token for some run.
         if (approval is null || approval.RunId != runId) return Results.NotFound();
 
-        var run = await runRepository.GetAsync(runId, ct);
         var last = approval.Responses.LastOrDefault();
 
         return Results.Ok(new AgentApprovalStatusResponse

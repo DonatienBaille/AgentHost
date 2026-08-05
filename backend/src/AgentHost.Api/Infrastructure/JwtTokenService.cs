@@ -9,6 +9,9 @@ namespace AgentHost.Api.Infrastructure;
 public interface IJwtTokenService
 {
     string GenerateToken(User user);
+
+    /// <summary>Lifetime of the access tokens this service issues, in minutes.</summary>
+    int AccessTokenLifetimeMinutes { get; }
 }
 
 /// <summary>
@@ -32,8 +35,13 @@ public class JwtTokenService : IJwtTokenService
         _key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         _issuer = config["Jwt:Issuer"] ?? "agenthost";
         _audience = config["Jwt:Audience"] ?? "agenthost";
-        _expiryMinutes = int.TryParse(config["Jwt:ExpiryMinutes"], out var m) ? m : 480;
+        // Short by design: access tokens are stateless and cannot be revoked, so a stolen one stays
+        // usable until it expires. 15 minutes bounds that window; revocation is handled by the
+        // persisted refresh token (POST /api/auth/refresh, POST /api/auth/logout) instead.
+        _expiryMinutes = int.TryParse(config["Jwt:ExpiryMinutes"], out var m) ? m : 15;
     }
+
+    public int AccessTokenLifetimeMinutes => _expiryMinutes;
 
     public string GenerateToken(User user)
     {
@@ -41,6 +49,9 @@ public class JwtTokenService : IJwtTokenService
         {
             new Claim(JwtRegisteredClaimNames.Sub, user.Id),
             new Claim(JwtRegisteredClaimNames.Email, user.Email),
+            // Unique per-token id: gives every access token a stable handle for correlation in
+            // logs, and is the hook a future deny-list would key on.
+            new Claim(JwtRegisteredClaimNames.Jti, UlidGenerator.NewUlid()),
             new Claim("org_id", user.OrgId),
             new Claim(ClaimTypes.Role, user.Role.ToDbString()),
         };

@@ -27,15 +27,17 @@ public static class AgentVersionEndpoints
         return app;
     }
 
-    private static async Task<IResult> ListAgentVersions(string agentId, IAgentVersionRepository repository, CancellationToken ct)
+    private static async Task<IResult> ListAgentVersions(
+        string agentId, IAgentVersionRepository repository, ICallerContext caller, CancellationToken ct)
     {
-        var versions = await repository.ListByAgentAsync(agentId, ct);
+        var versions = await repository.ListByAgentAsync(agentId, caller.OrgId, ct);
         return Results.Ok(versions);
     }
 
-    private static async Task<IResult> GetAgentVersion(string agentId, string versionId, IAgentVersionRepository repository, CancellationToken ct)
+    private static async Task<IResult> GetAgentVersion(
+        string agentId, string versionId, IAgentVersionRepository repository, ICallerContext caller, CancellationToken ct)
     {
-        var version = await repository.GetAsync(versionId, ct);
+        var version = await repository.GetAsync(versionId, caller.OrgId, ct);
         return version != null && version.AgentId == agentId ? Results.Ok(version) : Results.NotFound();
     }
 
@@ -44,9 +46,10 @@ public static class AgentVersionEndpoints
         PublishAgentVersionRequest req,
         IAgentRepository agentRepository,
         IAgentVersionRepository agentVersionRepository,
+        ICallerContext caller,
         CancellationToken ct)
     {
-        var agent = await agentRepository.GetAsync(agentId, ct);
+        var agent = await agentRepository.GetAsync(agentId, caller.OrgId, ct);
         if (agent is null) return Results.NotFound();
 
         var inputsSchema = req.InputsSchema is null ? agent.InputsSchema : JsonSerializer.Serialize(req.InputsSchema);

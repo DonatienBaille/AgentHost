@@ -92,6 +92,7 @@ builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IAuditLogRepository, AuditLogRepository>();
 builder.Services.AddScoped<ISecretRepository, SecretRepository>();
 builder.Services.AddScoped<IWebhookRepository, WebhookRepository>();
+builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
 // ---- Services ----
 builder.Services.AddScoped<IRunService, RunService>();

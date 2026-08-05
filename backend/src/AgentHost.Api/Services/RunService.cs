@@ -71,10 +71,14 @@ public class RunService : IRunService
     }
 
     /// <summary>
-    /// The human on whose behalf this call is running, taken from the signed token — never from the
-    /// request body. Null when there is no authenticated caller (e.g. an internal/background path).
+    /// The acting user, taken from the JWT — never from the request body. Null when there is no
+    /// HTTP caller on the ambient scope (SignalR hub invocations, background work): those paths
+    /// authorize the run against Context.User themselves before calling in.
     /// </summary>
     private string? CallerUserId => _callerContext.IsAuthenticated ? _callerContext.UserId : null;
+
+    /// <summary>The caller's organization, for the list methods below. Requires an HTTP caller.</summary>
+    private string CallerOrgId => _callerContext.OrgId;
 
     public async Task<Run> CreateAsync(CreateRunRequest req, CancellationToken ct = default)
     {
@@ -279,10 +283,10 @@ public class RunService : IRunService
     public Task<Run?> GetAsync(string id, CancellationToken ct = default) => _runRepository.GetAsync(id, ct);
 
     public Task<List<Run>> ListAsync(int skip, int take, CancellationToken ct = default) =>
-        _runRepository.ListAsync(skip, take, ct);
+        _runRepository.ListByOrgAsync(CallerOrgId, skip, take, ct);
 
     public Task<List<Run>> ListByProjectAsync(string projectId, int skip = 0, int take = 50, CancellationToken ct = default) =>
-        _runRepository.ListByProjectAsync(projectId, skip, take, ct);
+        _runRepository.ListByProjectAsync(projectId, CallerOrgId, skip, take, ct);
 
     public async Task<bool> ApproveAsync(string runId, ApprovalRequest req, CancellationToken ct = default)
     {

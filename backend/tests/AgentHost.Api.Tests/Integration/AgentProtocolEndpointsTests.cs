@@ -288,7 +288,9 @@ public class AgentProtocolEndpointsTests : IAsyncLifetime
         });
         Assert.Equal(HttpStatusCode.Created, requested.StatusCode);
 
-        var (developerToken, _) = await TestData.CreateUserWithRoleAsync(_owner, _auth.User.OrgId, UserRole.Developer);
+        // The org is no longer passed explicitly — the new user lands in the caller's own org,
+        // taken from the owner client's JWT.
+        var (developerToken, _) = await TestData.CreateUserWithRoleAsync(_owner, UserRole.Developer);
         var developer = TestData.AuthedClient(_factory, developerToken);
 
         // The developer passes the endpoint's RBAC policy but is below the approval's required role.
