@@ -1,0 +1,96 @@
+<!-- src/app/pages/agents/agents-list/agents-list.component.html -->
+
+<div class="p-6 max-w-5xl mx-auto">
+  <div class="flex items-center justify-between mb-8">
+    <h1 class="text-3xl font-bold">{{ pageTitle() | translate }}</h1>
+    @if (canCreate() && projectId()) {
+      <button
+        type="button"
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
+        (click)="toggleForm()"
+      >
+        {{ (showForm() ? 'common.cancel' : 'agentsList.newAgent') | translate }}
+      </button>
+    }
+  </div>
+
+  @if (error()) {
+    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+      <p class="text-red-200">{{ error() }}</p>
+    </div>
+  }
+
+  @if (showForm()) {
+    <form [formGroup]="form" (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
+      @if (submitError()) {
+        <div class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
+          {{ submitError() | translate }}
+        </div>
+      }
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="a-name">{{ 'agentsList.name' | translate }}</label>
+          <input id="a-name" type="text" formControlName="name" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="a-slug">{{ 'agentsList.slug' | translate }}</label>
+          <input id="a-slug" type="text" formControlName="slug" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm text-gray-400 mb-1" for="a-manifest">{{ 'agentsList.manifest' | translate }}</label>
+        <textarea
+          id="a-manifest"
+          formControlName="manifestYaml"
+          rows="8"
+          class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+        ></textarea>
+      </div>
+      <label class="flex items-center gap-2 text-sm text-gray-300">
+        <input type="checkbox" formControlName="publish" />
+        {{ 'agentsList.publishImmediately' | translate }}
+      </label>
+      <button
+        type="submit"
+        [disabled]="isSubmitting()"
+        class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded font-medium transition"
+      >
+        {{ (isSubmitting() ? 'common.saving' : 'common.create') | translate }}
+      </button>
+    </form>
+  }
+
+  @if (isLoading()) {
+    <div class="flex justify-center py-8">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+  }
+
+  <div class="grid gap-4 sm:grid-cols-2">
+    @for (agent of agents(); track agent.id) {
+      <a
+        [routerLink]="['/agents', agent.id]"
+        class="block bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-blue-500 transition"
+      >
+        <div class="flex items-center justify-between">
+          <div class="font-medium">{{ agent.name }}</div>
+          @if (agent.isPublished) {
+            <span class="px-2 py-0.5 rounded text-xs bg-green-900/60 text-green-300 border border-green-700">
+              {{ 'agentsList.published' | translate }}
+            </span>
+          } @else {
+            <span class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 border border-gray-600">
+              {{ 'agentsList.draft' | translate }}
+            </span>
+          }
+        </div>
+        <div class="text-xs text-gray-500 font-mono mt-1">{{ agent.slug }}</div>
+        <div class="text-xs text-gray-500 mt-1">{{ agent.agentType }}</div>
+      </a>
+    }
+
+    @if (!isLoading() && agents().length === 0) {
+      <p class="text-gray-500 text-sm">{{ 'agentsList.empty' | translate }}</p>
+    }
+  </div>
+</div>

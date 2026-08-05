@@ -1,0 +1,97 @@
+<!-- src/app/pages/admin/organizations/organizations.component.html -->
+
+<div class="p-6 max-w-5xl mx-auto">
+  <div class="flex items-center justify-between mb-8">
+    <h1 class="text-3xl font-bold">{{ 'adminOrgs.title' | translate }}</h1>
+    @if (isOwner()) {
+      <button
+        type="button"
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
+        (click)="toggleForm()"
+      >
+        {{ (showForm() ? 'common.cancel' : 'adminOrgs.newOrg') | translate }}
+      </button>
+    }
+  </div>
+
+  @if (!isOwner()) {
+    <div class="bg-yellow-900/50 border border-yellow-700 rounded-lg p-4 mb-6">
+      <p class="text-yellow-200 text-sm">{{ 'adminOrgs.ownerOnly' | translate }}</p>
+    </div>
+  }
+
+  @if (error()) {
+    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+      <p class="text-red-200">{{ error() }}</p>
+    </div>
+  }
+
+  @if (showForm() && isOwner()) {
+    <form [formGroup]="form" (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
+      @if (submitError()) {
+        <div class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
+          {{ submitError() | translate }}
+        </div>
+      }
+      <div class="grid gap-4 sm:grid-cols-3">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="o-name">{{ 'adminOrgs.name' | translate }}</label>
+          <input id="o-name" type="text" formControlName="name" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="o-slug">{{ 'adminOrgs.slug' | translate }}</label>
+          <input id="o-slug" type="text" formControlName="slug" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="o-plan">{{ 'adminOrgs.plan' | translate }}</label>
+          <select id="o-plan" formControlName="plan" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm">
+            <option value="free">free</option>
+            <option value="team">team</option>
+            <option value="business">business</option>
+            <option value="enterprise">enterprise</option>
+          </select>
+        </div>
+      </div>
+      <button
+        type="submit"
+        [disabled]="isSubmitting()"
+        class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded font-medium transition"
+      >
+        {{ (isSubmitting() ? 'common.saving' : 'common.create') | translate }}
+      </button>
+    </form>
+  }
+
+  @if (isLoading()) {
+    <div class="flex justify-center py-8">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+  }
+
+  <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-gray-400 border-b border-gray-700">
+          <th class="px-4 py-2">{{ 'adminOrgs.name' | translate }}</th>
+          <th class="px-4 py-2">{{ 'adminOrgs.slug' | translate }}</th>
+          <th class="px-4 py-2">{{ 'adminOrgs.plan' | translate }}</th>
+          <th class="px-4 py-2">{{ 'adminUsers.createdAt' | translate }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (org of organizations(); track org.id) {
+          <tr class="border-b border-gray-700 last:border-0">
+            <td class="px-4 py-2">{{ org.name }}</td>
+            <td class="px-4 py-2 font-mono text-xs">{{ org.slug }}</td>
+            <td class="px-4 py-2">{{ org.plan }}</td>
+            <td class="px-4 py-2 text-gray-500">{{ org.createdAt | date: 'short' }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+
+    @if (!isLoading() && organizations().length === 0) {
+      <p class="text-gray-500 text-sm p-4">{{ 'adminOrgs.empty' | translate }}</p>
+    }
+  </div>
+</div>

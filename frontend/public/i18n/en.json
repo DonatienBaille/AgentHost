@@ -1,10 +1,22 @@
 {
   "nav": {
     "dashboard": "Dashboard",
-    "runs": "Runs"
+    "projects": "Projects",
+    "agents": "Agents",
+    "runs": "Runs",
+    "admin": "Admin",
+    "adminUsers": "Users",
+    "adminOrganizations": "Organizations",
+    "adminSecrets": "Secrets",
+    "adminAuditLog": "Audit log",
+    "logout": "Log out"
   },
   "common": {
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "cancel": "Cancel",
+    "create": "Create",
+    "saving": "Saving…",
+    "delete": "Delete"
   },
   "status": {
     "pending": "Pending",
@@ -41,7 +53,10 @@
     "status": "Status",
     "duration": "Duration",
     "cost": "Cost",
-    "created": "Created"
+    "created": "Created",
+    "artifacts": "Artifacts",
+    "download": "Download",
+    "noArtifacts": "No artifacts yet."
   },
   "newRun": {
     "title": "New run",
@@ -82,6 +97,116 @@
     "newRun": "New run",
     "recentRuns": "Recent runs",
     "noRuns": "No runs for this project.",
-    "memory": "Project memory"
+    "memory": "Project memory",
+    "agents": "Agents",
+    "webhooks": "Webhooks"
+  },
+  "login": {
+    "signIn": "Sign in",
+    "signingIn": "Signing in…",
+    "createOrg": "Create organization",
+    "creating": "Creating…",
+    "email": "Email",
+    "password": "Password",
+    "passwordHint": "At least 8 characters.",
+    "orgName": "Organization name",
+    "orgSlug": "Organization slug",
+    "displayName": "Display name (optional)",
+    "invalidCredentials": "Incorrect email or password.",
+    "orgSlugTaken": "That organization slug is already taken.",
+    "genericError": "Something went wrong. Please try again."
+  },
+  "projectsList": {
+    "title": "Projects",
+    "newProject": "New project",
+    "name": "Name",
+    "slug": "Slug",
+    "description": "Description",
+    "budget": "Monthly budget (USD)",
+    "empty": "No projects yet.",
+    "createError": "Failed to create project."
+  },
+  "agentsList": {
+    "title": "Agents",
+    "titleForProject": "Project agents",
+    "newAgent": "New agent",
+    "name": "Name",
+    "slug": "Slug",
+    "manifest": "Manifest (YAML)",
+    "publishImmediately": "Publish immediately",
+    "published": "Published",
+    "draft": "Draft",
+    "empty": "No agents yet.",
+    "createError": "Failed to create agent."
+  },
+  "agentDetail": {
+    "manifest": "Manifest",
+    "versions": "Version history",
+    "noVersions": "No versions yet.",
+    "publishNew": "Publish a new version",
+    "publish": "Publish version",
+    "loadError": "Failed to load this agent.",
+    "publishError": "Failed to publish the new version."
+  },
+  "adminUsers": {
+    "title": "Users",
+    "newUser": "New user",
+    "email": "Email",
+    "password": "Password",
+    "displayName": "Display name",
+    "role": "Role",
+    "createdAt": "Created",
+    "empty": "No users yet.",
+    "createError": "Failed to create user."
+  },
+  "roles": {
+    "owner": "Owner",
+    "maintainer": "Maintainer",
+    "developer": "Developer",
+    "viewer": "Viewer"
+  },
+  "adminOrgs": {
+    "title": "Organizations",
+    "newOrg": "New organization",
+    "ownerOnly": "Only owners can manage organizations.",
+    "name": "Name",
+    "slug": "Slug",
+    "plan": "Plan",
+    "empty": "No organizations yet.",
+    "createError": "Failed to create organization."
+  },
+  "adminSecrets": {
+    "title": "Secrets",
+    "newSecret": "New secret",
+    "name": "Name",
+    "scope": "Scope",
+    "scopeOrg": "Organization",
+    "scopeProject": "Project",
+    "projectId": "Project ID",
+    "value": "Value",
+    "lastUsed": "Last used",
+    "empty": "No secrets yet.",
+    "createError": "Failed to create secret."
+  },
+  "adminWebhooks": {
+    "title": "Webhooks",
+    "newWebhook": "New webhook",
+    "url": "URL",
+    "secretToken": "Secret token (optional)",
+    "events": "Events",
+    "active": "Active",
+    "inactive": "Inactive",
+    "activate": "Activate",
+    "deactivate": "Deactivate",
+    "empty": "No webhooks for this project yet.",
+    "createError": "Failed to create webhook."
+  },
+  "adminAudit": {
+    "title": "Audit log",
+    "action": "Action",
+    "actor": "Actor",
+    "resource": "Resource",
+    "timestamp": "Timestamp",
+    "empty": "No audit log entries yet."
   }
 }

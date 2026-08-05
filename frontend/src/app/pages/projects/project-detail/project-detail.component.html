@@ -21,12 +21,26 @@
           <p class="text-gray-400">{{ proj.description }}</p>
         }
       </div>
-      <a
-        [routerLink]="['/projects', proj.id, 'new-run']"
-        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
-      >
-        {{ 'projectDetail.newRun' | translate }}
-      </a>
+      <div class="flex items-center gap-2">
+        <a
+          [routerLink]="['/projects', proj.id, 'agents']"
+          class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded font-medium transition"
+        >
+          {{ 'projectDetail.agents' | translate }}
+        </a>
+        <a
+          [routerLink]="['/admin/webhooks', proj.id]"
+          class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded font-medium transition"
+        >
+          {{ 'projectDetail.webhooks' | translate }}
+        </a>
+        <a
+          [routerLink]="['/projects', proj.id, 'new-run']"
+          class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
+        >
+          {{ 'projectDetail.newRun' | translate }}
+        </a>
+      </div>
     </div>
 
     <div class="grid gap-8 lg:grid-cols-3">

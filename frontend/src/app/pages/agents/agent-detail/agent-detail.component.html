@@ -1,0 +1,94 @@
+<!-- src/app/pages/agents/agent-detail/agent-detail.component.html -->
+
+@let current_agent = agent();
+
+<div class="p-6 max-w-5xl mx-auto">
+  @if (isLoading()) {
+    <div class="flex justify-center py-8">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+  }
+
+  @if (loadError()) {
+    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+      <p class="text-red-200">{{ loadError() | translate }}</p>
+    </div>
+  }
+
+  @if (current_agent) {
+    <div class="mb-8">
+      <div class="flex items-center gap-3">
+        <h1 class="text-3xl font-bold">{{ current_agent.name }}</h1>
+        @if (current_agent.isPublished) {
+          <span class="px-2 py-0.5 rounded text-xs bg-green-900/60 text-green-300 border border-green-700">
+            {{ 'agentsList.published' | translate }}
+          </span>
+        }
+      </div>
+      <div class="text-sm text-gray-500 font-mono mt-1">{{ current_agent.slug }} · {{ current_agent.agentType }}</div>
+    </div>
+
+    <div class="grid gap-8 lg:grid-cols-2">
+      <!-- Manifest -->
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <h2 class="text-lg font-semibold mb-3">{{ 'agentDetail.manifest' | translate }}</h2>
+        <pre class="bg-gray-900 border border-gray-700 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap">{{ current_agent.manifestYaml }}</pre>
+      </div>
+
+      <!-- Version history -->
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <h2 class="text-lg font-semibold mb-3">{{ 'agentDetail.versions' | translate }}</h2>
+
+        @if (isLoadingVersions()) {
+          <div class="flex justify-center py-4">
+            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+          </div>
+        }
+
+        <div class="space-y-2 max-h-80 overflow-y-auto">
+          @for (version of versions(); track version.id) {
+            <div class="bg-gray-900 border border-gray-700 rounded p-3">
+              <div class="flex items-center justify-between">
+                <span class="font-mono text-sm">v{{ version.versionNumber }}</span>
+                <span class="text-xs text-gray-500">{{ version.createdAt | date: 'short' }}</span>
+              </div>
+              <div class="text-xs text-gray-500 font-mono mt-1 truncate">{{ version.digestSha256 }}</div>
+            </div>
+          }
+
+          @if (!isLoadingVersions() && versions().length === 0) {
+            <p class="text-gray-500 text-sm">{{ 'agentDetail.noVersions' | translate }}</p>
+          }
+        </div>
+      </div>
+    </div>
+
+    <!-- Publish new version -->
+    @if (canPublish()) {
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mt-8">
+        <h2 class="text-lg font-semibold mb-3">{{ 'agentDetail.publishNew' | translate }}</h2>
+
+        @if (publishError()) {
+          <div class="bg-red-900/50 border border-red-700 rounded-lg p-3 mb-4 text-sm text-red-200">
+            {{ publishError() | translate }}
+          </div>
+        }
+
+        <form [formGroup]="publishForm" (ngSubmit)="publish()" class="space-y-4">
+          <textarea
+            formControlName="manifestYaml"
+            rows="10"
+            class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+          ></textarea>
+          <button
+            type="submit"
+            [disabled]="isPublishing()"
+            class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded font-medium transition"
+          >
+            {{ (isPublishing() ? 'common.saving' : 'agentDetail.publish') | translate }}
+          </button>
+        </form>
+      </div>
+    }
+  }
+</div>
