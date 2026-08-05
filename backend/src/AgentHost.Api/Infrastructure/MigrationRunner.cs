@@ -13,9 +13,28 @@ namespace AgentHost.Api.Infrastructure;
 /// the `docker-entrypoint-initdb.d` mount, so the migrations folder generally won't be present
 /// inside the backend container image — in that case this runner just logs and no-ops, letting
 /// Postgres's own init have already done the work.
+///
+/// Every replica runs this at startup, so the whole read-then-apply sequence is serialized behind a
+/// session-level Postgres advisory lock (<see cref="MigrationLockKey"/>). Without it two pods
+/// starting together can both read `schema_migrations` before either writes, and both apply the
+/// same file. The lock is taken on the same connection that does the work — the advisory lock is
+/// session-scoped, so it would not protect anything held on a different session — and released in a
+/// `finally`; the session ending also releases it, so a crashed pod cannot wedge the others.
 /// </summary>
 public class MigrationRunner
 {
+    /// <summary>
+    /// Fixed, arbitrary key identifying "the AgentHost schema migration lock". Any value works as
+    /// long as every replica uses the same one and nothing else in the database reuses it.
+    /// </summary>
+    private const long MigrationLockKey = 7_235_812_004_119_001L;
+
+    /// <summary>
+    /// Seconds a replica waits for a peer's migration run before giving up. Bounded so a wedged
+    /// peer surfaces as a startup failure instead of an indefinite hang.
+    /// </summary>
+    private const int LockWaitSeconds = 300;
+
     private readonly string _connectionString;
     private readonly string _contentRootPath;
     private readonly ILogger _logger;
@@ -52,6 +71,38 @@ public class MigrationRunner
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(ct);
 
+        await using (var lockCmd = connection.CreateCommand())
+        {
+            lockCmd.CommandText = "SELECT pg_advisory_lock(@key)";
+            lockCmd.Parameters.AddWithValue("key", MigrationLockKey);
+            lockCmd.CommandTimeout = LockWaitSeconds;
+            await lockCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        try
+        {
+            await ApplyPendingAsync(connection, files, ct);
+        }
+        finally
+        {
+            try
+            {
+                await using var unlockCmd = connection.CreateCommand();
+                unlockCmd.CommandText = "SELECT pg_advisory_unlock(@key)";
+                unlockCmd.Parameters.AddWithValue("key", MigrationLockKey);
+                // Not cancellable: releasing the lock must happen even when startup is aborting.
+                await unlockCmd.ExecuteNonQueryAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // Closing the connection below releases the session lock anyway.
+                _logger.Warning(ex, "Failed to release the migration advisory lock explicitly");
+            }
+        }
+    }
+
+    private async Task ApplyPendingAsync(NpgsqlConnection connection, List<string> files, CancellationToken ct)
+    {
         await using (var createTableCmd = connection.CreateCommand())
         {
             createTableCmd.CommandText = """
