@@ -178,6 +178,10 @@ describe('errorInterceptor', () => {
     expect(authService.isAuthenticated()).toBe(false);
     expect(navigatedTo[0][0]).toEqual(['/login']);
     expect(navigatedTo[0][1]).toEqual({ queryParams: { returnUrl: '/runs/abc' } });
+
+    // Reported after the navigation resolves, since App clears the banner on NavigationEnd.
+    await Promise.resolve();
+    expect(errorService.lastError()).toBe('errors.sessionExpired');
   });
 
   it('does not attempt a refresh when there is no refresh token', () => {

@@ -17,7 +17,8 @@
     "create": "Créer",
     "saving": "Enregistrement…",
     "delete": "Supprimer",
-    "retry": "Réessayer"
+    "retry": "Réessayer",
+    "dismiss": "Fermer"
   },
   "status": {
     "pending": "En attente",

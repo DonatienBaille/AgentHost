@@ -81,6 +81,27 @@
     </nav>
   }
 
+  <!--
+    The shared error signal the error interceptor writes into had no renderer at all, so
+    "insufficient permissions" and friends went nowhere. Messages are stored as translation keys
+    where they are ours; a raw server message passes through the pipe unchanged.
+  -->
+  @if (lastError(); as message) {
+    <div class="fixed bottom-4 right-4 z-30 max-w-sm" role="alert" aria-live="polite">
+      <div class="bg-red-900/95 border border-red-700 rounded-lg shadow-lg p-4 flex items-start gap-3">
+        <p class="text-sm text-red-100 flex-1">{{ message | translate }}</p>
+        <button
+          type="button"
+          class="text-red-300 hover:text-white text-sm leading-none shrink-0"
+          [attr.aria-label]="'common.dismiss' | translate"
+          (click)="dismissError()"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  }
+
   <main>
     <router-outlet />
   </main>

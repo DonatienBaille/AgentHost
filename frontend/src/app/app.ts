@@ -4,6 +4,7 @@ import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } fro
 import { TranslateService, TranslatePipe } from '@ngx-translate/core';
 import { filter, map, startWith } from 'rxjs';
 import { AuthService } from './services/auth.service';
+import { ErrorService } from './services/error.service';
 
 @Component({
   selector: 'app-root',
@@ -17,8 +18,12 @@ export class App {
   private readonly translate = inject(TranslateService);
   private readonly router = inject(Router);
   readonly authService = inject(AuthService);
+  private readonly errorService = inject(ErrorService);
 
   readonly languages = ['fr', 'en'];
+
+  /** Last HTTP failure reported by the error interceptor, shown as a dismissible banner. */
+  readonly lastError = this.errorService.lastError;
 
   /** Hides the main nav shell on the standalone /login page. */
   readonly isLoginRoute = toSignal(
@@ -32,6 +37,11 @@ export class App {
 
   constructor() {
     this.authService.loadFromStorage();
+
+    // Don't drag a stale failure banner across the whole app once the user has moved on.
+    this.router.events
+      .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
+      .subscribe(() => this.errorService.clear());
   }
 
   useLanguage(lang: string): void {
@@ -41,6 +51,10 @@ export class App {
 
   currentLanguage(): string {
     return this.translate.getCurrentLang() || 'fr';
+  }
+
+  dismissError(): void {
+    this.errorService.clear();
   }
 
   async logout(): Promise<void> {

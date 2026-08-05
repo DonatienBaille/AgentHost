@@ -17,7 +17,8 @@
     "create": "Create",
     "saving": "Saving…",
     "delete": "Delete",
-    "retry": "Retry"
+    "retry": "Retry",
+    "dismiss": "Dismiss"
   },
   "status": {
     "pending": "Pending",

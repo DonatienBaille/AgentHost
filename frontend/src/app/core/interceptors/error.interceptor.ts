@@ -7,7 +7,6 @@ import {
 } from '@angular/common/http';
 import { Injector, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { TranslateService } from '@ngx-translate/core';
 import { Observable, catchError, switchMap, throwError } from 'rxjs';
 import { ErrorService } from '../../services/error.service';
 import {
@@ -57,11 +56,11 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
 
       if (err.status === 403) {
         // Authenticated, just not allowed. Never clears the session.
-        errorService.report(translate(injector, 'errors.forbidden'));
+        errorService.report('errors.forbidden');
         return throwError(() => err);
       }
 
-      errorService.report(extractMessage(err, injector));
+      errorService.report(extractMessage(err));
       return throwError(() => err);
     }),
   );
@@ -94,7 +93,7 @@ function handleExpiredSession(
             authService.clearSession();
             redirectToLogin(injector);
           } else {
-            injector.get(ErrorService).report(extractMessage(replayError, injector));
+            injector.get(ErrorService).report(extractMessage(replayError));
           }
           return throwError(() => replayError);
         }),
@@ -112,7 +111,6 @@ function redirectToLogin(injector: Injector): void {
   const router = injector.get(Router);
 
   authService.clearSession();
-  injector.get(ErrorService).report(translate(injector, 'errors.sessionExpired'));
 
   const attemptedUrl = router.url;
   const queryParams =
@@ -120,16 +118,21 @@ function redirectToLogin(injector: Injector): void {
       ? { returnUrl: attemptedUrl }
       : {};
 
-  void router.navigate(['/login'], { queryParams });
+  // Reported *after* the navigation: App clears the error banner on every NavigationEnd, so
+  // announcing the expiry first would wipe it on the way to /login.
+  void router
+    .navigate(['/login'], { queryParams })
+    .then(() => injector.get(ErrorService).report('errors.sessionExpired'));
 }
 
-function translate(injector: Injector, key: string): string {
-  return injector.get(TranslateService).instant(key);
-}
-
-function extractMessage(err: HttpErrorResponse, injector: Injector): string {
+/**
+ * A translation key for the failures we recognise, otherwise the server's own message. The banner
+ * in app.html pipes this through `translate`, which returns unknown keys (i.e. server text)
+ * verbatim — so nothing has to be translated at interceptor time, before i18n has even loaded.
+ */
+function extractMessage(err: HttpErrorResponse): string {
   if (err.status === 0) {
-    return translate(injector, 'errors.network');
+    return 'errors.network';
   }
   if (typeof err.error === 'string' && err.error.trim().length > 0) {
     return err.error;
@@ -143,5 +146,5 @@ function extractMessage(err: HttpErrorResponse, injector: Injector): string {
       return String(body.message);
     }
   }
-  return `${err.status} ${err.statusText || translate(injector, 'errors.requestFailed')}`;
+  return err.statusText ? `${err.status} ${err.statusText}` : 'errors.requestFailed';
 }
