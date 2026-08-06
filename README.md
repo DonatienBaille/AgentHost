@@ -236,8 +236,8 @@ de secrets vide pendant toute la vie du projet sans qu'aucun test ne le remarque
 
 `backend/tests/AgentHost.Api.Tests/Integration/ContainerLifecycleTests.cs` exécute désormais ce
 chemin pour de bon, une fois, contre un vrai démon (en CI sur `ubuntu-latest` ; localement dès qu'un
-démon répond). L'agent est `alpine` plus un script shell, construit à la volée via l'endpoint
-`/build` du démon — aucune image de fixture dans le dépôt, aucun registre. Le conteneur joint l'API
+démon répond). L'agent est `alpine` plus un script shell, commité à la volée dans un tag local
+jetable — aucun Dockerfile, aucune image de fixture dans le dépôt, aucun registre. Le conteneur joint l'API
 par la **gateway du bridge Docker**, lue sur le démon et non codée en dur, l'application étant
 servie en plus sur Kestrel (un `TestServer` n'a aucun socket à composer).
 

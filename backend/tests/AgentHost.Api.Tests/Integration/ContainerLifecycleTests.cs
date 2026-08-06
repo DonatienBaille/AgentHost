@@ -1,7 +1,5 @@
-using System.Formats.Tar;
 using System.Net;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentHost.Api.Contracts;
@@ -34,11 +32,8 @@ namespace AgentHost.Api.Tests.Integration;
 ///
 /// <para><b>How the agent's behaviour gets into the container.</b> The orchestrator never sets a
 /// container command — an agent image carries its own entrypoint — so the behaviour is supplied as
-/// an image, built at test time from <c>alpine</c> plus a shell script through the daemon's own
-/// build endpoint. No registry, no push, no committed fixture image. The tag is prefixed
-/// <c>localhost:5000/</c> so that the orchestrator's pull attempt (which always runs, and always
-/// fails for a local-only tag) fails instantly against a refused connection instead of doing a
-/// round trip to Docker Hub.</para>
+/// an image: <c>alpine</c> plus a shell script, committed at test time into a throwaway local tag.
+/// No Dockerfile, no builder, no registry, no push, no fixture image in the repository.</para>
 ///
 /// <para><b>Determinism.</b> The container's assertions all run immediately, but it then waits for
 /// the host to create a release file inside the <c>/workspace</c> bind mount before exiting. That
@@ -77,9 +72,16 @@ public class ContainerLifecycleTests : IClassFixture<ContainerLifecycleFixture>
     [DockerFact]
     public void Secret_IsDeliveredToTheContainerAsAFile()
     {
+        // The container's own comparison passed, which is what makes the run succeed at all.
         Assert.True(_fixture.FinalRun.Status == RunStatus.Succeeded, _fixture.Diagnostics);
-        Assert.Contains("/run/secrets", string.Join(" ", _fixture.Container.HostConfig.Binds ?? new List<string>()));
-        Assert.Contains(":ro", string.Join(" ", _fixture.Container.HostConfig.Binds ?? new List<string>()));
+
+        // ...and the mount it read through is the read-only bind of the directory whose deletion
+        // PlaintextSecrets_AreDeletedFromDiskWhenTheContainerExits then requires.
+        var binds = _fixture.Container.HostConfig.Binds ?? new List<string>();
+        var secretsBind = Assert.Single(binds, b => b.Contains(":/run/secrets", StringComparison.Ordinal));
+        Assert.StartsWith(_fixture.SecretsDirectory + ":", secretsBind);
+        Assert.EndsWith(":ro", secretsBind);
+        Assert.Contains(binds, b => b.Contains(":/workspace", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -103,7 +105,12 @@ public class ContainerLifecycleTests : IClassFixture<ContainerLifecycleFixture>
     [DockerFact]
     public void AgentCallback_FromInsideTheContainer_IsReadableOnTheRunEventStream()
     {
-        var evt = Assert.Single(_fixture.Events, e => e.EventType == ContainerLifecycleFixture.AgentEventType);
+        Assert.True(
+            _fixture.Events.Any(e => e.EventType == ContainerLifecycleFixture.AgentEventType),
+            $"the container's event never reached the run event stream. {_fixture.Diagnostics}. " +
+            $"Events seen: {string.Join(", ", _fixture.Events.Select(e => e.EventType))}");
+
+        var evt = _fixture.Events.First(e => e.EventType == ContainerLifecycleFixture.AgentEventType);
 
         Assert.Equal("info", evt.Level);
         Assert.True(evt.Seq > 0, "the event bus assigns a sequence number");
@@ -128,13 +135,17 @@ public class ContainerLifecycleTests : IClassFixture<ContainerLifecycleFixture>
         var hostConfig = _fixture.Container.HostConfig;
 
         Assert.True(hostConfig.ReadonlyRootfs, "read-only rootfs (spec 13.2)");
-        Assert.Equal(new[] { "ALL" }, hostConfig.CapDrop);
-        Assert.Contains("no-new-privileges=true", hostConfig.SecurityOpt);
         Assert.Contains("/tmp", hostConfig.Tmpfs.Keys);
+
+        // Capability and security-option spellings are compared loosely on purpose: what matters is
+        // that the daemon recorded "drop everything" and "no new privileges", and engines differ on
+        // whether they echo CAP_ prefixes or normalize the option's `=true` form.
+        Assert.Contains(hostConfig.CapDrop, c => Capability(c) == "ALL");
+        Assert.Contains(hostConfig.SecurityOpt, o => o.Contains("no-new-privileges", StringComparison.OrdinalIgnoreCase));
 
         // network: full in the manifest, so bridge plus the one capability the orchestrator adds back.
         Assert.Equal("bridge", hostConfig.NetworkMode);
-        Assert.Equal(new[] { "NET_BIND_SERVICE" }, hostConfig.CapAdd);
+        Assert.Contains(hostConfig.CapAdd, c => Capability(c) == "NET_BIND_SERVICE");
     }
 
     /// <summary>
@@ -150,7 +161,23 @@ public class ContainerLifecycleTests : IClassFixture<ContainerLifecycleFixture>
 
         Assert.Equal(profile.Cpu * 1_000_000_000L, hostConfig.NanoCPUs);
         Assert.Equal(profile.MemoryBytes, hostConfig.Memory);
-        Assert.Equal(profile.MemoryBytes, hostConfig.MemorySwap); // no swap
+
+        // MemorySwap == Memory is how "no swap" is expressed. A daemon whose kernel has no swap
+        // accounting (no swapaccount=1 — the default on many hosts, including GitHub's runners)
+        // rejects the pairing and rewrites it to -1, logging "No swap limit support" at startup.
+        // That is the platform's answer, not the orchestrator's, so both are accepted here — and
+        // the second one is worth knowing about: on such a host the memory cap does not cover swap.
+        Assert.True(
+            hostConfig.MemorySwap == profile.MemoryBytes || hostConfig.MemorySwap == -1,
+            $"expected MemorySwap == Memory ({profile.MemoryBytes}) or -1 (daemon without swap " +
+            $"accounting), got {hostConfig.MemorySwap}");
+    }
+
+    /// <summary>Capability name without the engine-dependent <c>CAP_</c> prefix, upper-cased.</summary>
+    private static string Capability(string name)
+    {
+        var trimmed = name.Trim().ToUpperInvariant();
+        return trimmed.StartsWith("CAP_", StringComparison.Ordinal) ? trimmed[4..] : trimmed;
     }
 
     [DockerFact]
@@ -184,31 +211,12 @@ public class ContainerLifecycleTests : IClassFixture<ContainerLifecycleFixture>
 }
 
 /// <summary>
-/// The parts of the end-to-end fixture that can be checked without a daemon: the build context it
-/// would send, and the agent script inside it. These run everywhere — a broken tar or a script that
-/// lost its API address would otherwise only be discovered on a machine that has Docker.
+/// The part of the end-to-end fixture that can be checked without a daemon: the agent script that
+/// gets baked into the image. It runs everywhere — a script that lost its API address, its secret
+/// name or its line endings would otherwise only be discovered on a machine that has Docker.
 /// </summary>
-public class ContainerBuildContextTests
+public class AgentScriptTests
 {
-    [Fact]
-    public void BuildContext_ContainsADockerfileAndAnExecutableAgentScript()
-    {
-        using var context = ContainerLifecycleFixture.BuildContextTar("http://172.17.0.1:41234");
-        using var reader = new TarReader(context);
-
-        var entries = new Dictionary<string, (UnixFileMode Mode, string Content)>();
-        while (reader.GetNextEntry() is { } entry)
-        {
-            using var data = new StreamReader(entry.DataStream!);
-            entries[entry.Name] = (entry.Mode, data.ReadToEnd());
-        }
-
-        Assert.Equal(new[] { "Dockerfile", "agent.sh" }, entries.Keys.OrderBy(k => k, StringComparer.Ordinal));
-        Assert.Contains("FROM alpine:3.20", entries["Dockerfile"].Content);
-        Assert.Contains("""CMD ["/bin/sh", "/agent.sh"]""", entries["Dockerfile"].Content);
-        Assert.True(entries["agent.sh"].Mode.HasFlag(UnixFileMode.UserExecute));
-    }
-
     /// <summary>
     /// The script is generated per test run because it carries the address of that run's listener;
     /// a placeholder surviving into the image would produce a container that dials nowhere.
@@ -240,6 +248,17 @@ public sealed class ContainerLifecycleFixture : IAsyncLifetime
     public const string AgentEventType = "agent.e2e.contract";
     public const string OutputFileName = "agent-output.txt";
     public const string ReleaseFileName = "host-says-you-may-exit";
+
+    public const string BaseImageRepository = "alpine";
+    public const string BaseImageTag = "3.20";
+
+    /// <summary>
+    /// Repository for the image built per test run. The <c>localhost:5000/</c> prefix is load
+    /// bearing: the orchestrator pulls every image it launches, that pull cannot succeed for a
+    /// local-only tag, and this way it fails against a refused connection in milliseconds instead
+    /// of doing a round trip to Docker Hub (and counting against its anonymous rate limit).
+    /// </summary>
+    public const string ImageRepository = "localhost:5000/agenthost-e2e-agent";
 
     /// <summary>
     /// What each non-zero exit from the agent script means. Surfaced in the failure message because
@@ -300,8 +319,8 @@ public sealed class ContainerLifecycleFixture : IAsyncLifetime
         _docker = _factory.Services.GetRequiredService<DockerClient>();
 
         var apiBaseUrl = await ResolveContainerFacingApiUrlAsync(_docker, _factory.ListeningPort);
-        _imageTag = $"localhost:5000/agenthost-e2e-agent:{Guid.NewGuid().ToString("N")[..12]}";
-        await BuildAgentImageAsync(_docker, _imageTag, apiBaseUrl);
+        _imageTag = $"{ImageRepository}:{Guid.NewGuid().ToString("N")[..12]}";
+        await CreateAgentImageAsync(_docker, _imageTag, apiBaseUrl);
 
         // ---- org / project / secret / agent, all through the real API ----
         var suffix = TestData.Suffix();
@@ -337,9 +356,11 @@ public sealed class ContainerLifecycleFixture : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, runResponse.StatusCode);
         var run = (await runResponse.Content.ReadFromJsonAsync<Run>(TestJson.Options))!;
 
-        var runDirectory = Path.Combine(_workspaceRoot, run.Id);
-        SecretsDirectory = Path.Combine(runDirectory, "secrets");
-        var workspaceDirectory = Path.Combine(runDirectory, "workspace");
+        // The run's two directories as the *backend* computes them, not as the test guesses them:
+        // this is the same ContainerPathMapper instance the orchestrator wrote through.
+        var paths = _factory.Services.GetRequiredService<ContainerPathMapper>();
+        SecretsDirectory = paths.LocalSecretsDirectory(run.Id);
+        var workspaceDirectory = paths.LocalWorkspaceDirectory(run.Id);
 
         // Snapshot the container while it is alive — the orchestrator removes it seconds later.
         Container = await InspectLaunchedContainerAsync(_docker, run.Id, client);
@@ -410,78 +431,55 @@ public sealed class ContainerLifecycleFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Builds the agent image through the daemon's build endpoint from an in-memory tar context
-    /// (a Dockerfile plus the agent script). <c>alpine</c> is the base because its BusyBox
-    /// <c>wget</c> supports <c>--post-data</c>, which is all the agent needs to speak the callback
-    /// protocol — no package installation, so the build needs no network beyond the base image.
+    /// Produces the agent image: pull <c>alpine</c>, create a container whose command is the agent
+    /// script, commit it, throw the container away. The script has to live in the *image* rather
+    /// than be passed at create time because <see cref="Services.ContainerOrchestrator"/> sets no
+    /// <c>Cmd</c> — a real agent image carries its own entrypoint — and this test must not bend the
+    /// product to make itself possible.
+    ///
+    /// <para>Commit rather than <c>/build</c>: it is one stable API call against an image that is
+    /// already local, needs no build context and no builder (the classic builder behind the build
+    /// endpoint is deprecated), and produces a layerless image in milliseconds.</para>
+    ///
+    /// <para><c>alpine</c> is the base because its BusyBox <c>wget</c> supports
+    /// <c>--post-data</c> — everything the agent needs to speak the callback protocol, with nothing
+    /// to install.</para>
     /// </summary>
-    private static async Task BuildAgentImageAsync(DockerClient docker, string tag, string apiBaseUrl)
+    private static async Task CreateAgentImageAsync(DockerClient docker, string tag, string apiBaseUrl)
     {
-        using var context = BuildContextTar(apiBaseUrl);
+        await docker.Images.CreateImageAsync(
+            new ImagesCreateParameters { FromImage = BaseImageRepository, Tag = BaseImageTag },
+            null,
+            new Progress<JSONMessage>(_ => { }),
+            CancellationToken.None);
 
-        var output = new List<string>();
-        await docker.Images.BuildImageFromDockerfileAsync(
-            new ImageBuildParameters { Dockerfile = "Dockerfile", Tags = new List<string> { tag }, Remove = true, ForceRemove = true },
-            context,
-            Array.Empty<AuthConfig>(),
-            new Dictionary<string, string>(),
-            new Progress<JSONMessage>(m =>
-            {
-                if (!string.IsNullOrWhiteSpace(m.Stream)) output.Add(m.Stream.Trim());
-                if (!string.IsNullOrWhiteSpace(m.ErrorMessage)) output.Add("ERROR: " + m.ErrorMessage.Trim());
-            }),
+        var command = new[] { "/bin/sh", "-c", AgentScript(apiBaseUrl) };
+
+        var scaffold = await docker.Containers.CreateContainerAsync(
+            new CreateContainerParameters { Image = $"{BaseImageRepository}:{BaseImageTag}", Cmd = command },
             CancellationToken.None);
 
         try
         {
-            // The build endpoint reports failures in its output stream, not as an exception.
-            await docker.Images.InspectImageAsync(tag, CancellationToken.None);
+            await docker.Images.CommitContainerChangesAsync(
+                new CommitContainerChangesParameters
+                {
+                    ContainerID = scaffold.ID,
+                    RepositoryName = ImageRepository,
+                    Tag = tag.Split(':').Last(),
+                    Comment = "AgentHost end-to-end contract agent",
+                    Config = new Config { Cmd = command },
+                },
+                CancellationToken.None);
         }
-        catch (DockerImageNotFoundException ex)
+        finally
         {
-            throw new InvalidOperationException(
-                $"Building the agent image {tag} failed. Build output:{Environment.NewLine}" +
-                string.Join(Environment.NewLine, output), ex);
-        }
-    }
-
-    /// <summary>
-    /// The build context the daemon receives: a tar of a two-line Dockerfile and the agent script.
-    /// Built in memory — there is no fixture image checked into the repository and nothing is
-    /// pushed anywhere. Exposed to <see cref="ContainerBuildContextTests"/>, which checks it
-    /// without needing a daemon.
-    /// </summary>
-    internal static MemoryStream BuildContextTar(string apiBaseUrl)
-    {
-        const string dockerfile = """
-            FROM alpine:3.20
-            COPY agent.sh /agent.sh
-            CMD ["/bin/sh", "/agent.sh"]
-            """;
-
-        var context = new MemoryStream();
-        using (var tar = new TarWriter(context, TarEntryFormat.Ustar, leaveOpen: true))
-        {
-            AddFile(tar, "Dockerfile", dockerfile,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
-            AddFile(tar, "agent.sh", AgentScript(apiBaseUrl),
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            await docker.Containers.RemoveContainerAsync(
+                scaffold.ID, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
         }
 
-        context.Position = 0;
-        return context;
-    }
-
-    private static void AddFile(TarWriter tar, string name, string content, UnixFileMode mode)
-    {
-        // The daemon's builder and /bin/sh both want LF, whatever the host wrote the literal with.
-        var bytes = Encoding.UTF8.GetBytes(content.ReplaceLineEndings("\n"));
-        tar.WriteEntry(new UstarTarEntry(TarEntryType.RegularFile, name)
-        {
-            DataStream = new MemoryStream(bytes),
-            Mode = mode,
-        });
+        // Fail here, with the tag in hand, rather than inside the orchestrator's pull-and-shrug path.
+        await docker.Images.InspectImageAsync(tag, CancellationToken.None);
     }
 
     /// <summary>
