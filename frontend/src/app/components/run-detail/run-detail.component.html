@@ -34,7 +34,7 @@
       <!-- Human-in-the-loop: the run is blocked on a gate or a question -->
       @if (isBlocked()) {
         @let approval = pendingApproval();
-        <div class="bg-amber-950/40 border border-amber-700 rounded-lg p-4">
+        <div data-testid="approval-panel" class="bg-amber-950/40 border border-amber-700 rounded-lg p-4">
           <h2 class="text-lg font-semibold text-amber-200 mb-1">
             {{ (isAwaitingInput() ? 'runDetail.questionAsked' : 'runDetail.approvalRequired') | translate }}
           </h2>
@@ -65,7 +65,7 @@
 
           @if (!canDecide()) {
             <!-- The server rejects under-privileged deciders, so don't offer a doomed action. -->
-            <p class="text-amber-300 text-sm">
+            <p data-testid="insufficient-role" class="text-amber-300 text-sm">
               {{ 'runDetail.insufficientRole' | translate: { role: 'roles.' + requiredRole() | translate } }}
             </p>
           } @else if (isAwaitingInput()) {
@@ -97,6 +97,7 @@
                 type="button"
                 [disabled]="isDeciding() || !answerText().trim()"
                 class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded font-medium transition"
+                data-testid="submit-answer"
                 (click)="submitAnswer()"
               >
                 {{ (isDeciding() ? 'runDetail.deciding' : 'runDetail.submitAnswer') | translate }}
@@ -114,6 +115,7 @@
                 type="button"
                 [disabled]="isDeciding()"
                 class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded font-medium transition"
+                data-testid="approve-run"
                 (click)="decide('approve')"
               >
                 {{ (isDeciding() ? 'runDetail.deciding' : 'runDetail.approve') | translate }}
@@ -122,6 +124,7 @@
                 type="button"
                 [disabled]="isDeciding()"
                 class="px-4 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 rounded font-medium transition"
+                data-testid="reject-run"
                 (click)="decide('reject')"
               >
                 {{ 'runDetail.reject' | translate }}
@@ -178,7 +181,7 @@
 
         <div class="space-y-1 max-h-[32rem] overflow-y-auto font-mono text-sm">
           @for (event of events(); track event.seq) {
-            <div class="p-2 hover:bg-gray-700 rounded transition">
+            <div data-testid="run-event" class="p-2 hover:bg-gray-700 rounded transition">
               <span class="text-gray-500">[{{ event.timestamp | date: 'HH:mm:ss' }}]</span>
               <span class="text-blue-400 ml-2">{{ event.eventType }}</span>
               @switch (event.level) {
@@ -200,7 +203,7 @@
           }
 
           @if (events().length === 0) {
-            <p class="text-gray-500 py-6 text-center">{{ 'runDetail.noEvents' | translate }}</p>
+            <p data-testid="no-events" class="text-gray-500 py-6 text-center">{{ 'runDetail.noEvents' | translate }}</p>
           }
         </div>
       </div>
@@ -212,7 +215,7 @@
       @if (current_run) {
         <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
           <h3 class="font-semibold mb-2">{{ 'runDetail.status' | translate }}</h3>
-          <div class="inline-block px-3 py-1 rounded text-sm font-semibold uppercase tracking-wide" [class]="statusBadgeClass(current_run.status)">
+          <div data-testid="run-status" class="inline-block px-3 py-1 rounded text-sm font-semibold uppercase tracking-wide" [class]="statusBadgeClass(current_run.status)">
             {{ 'status.' + current_run.status | translate }}
           </div>
           @if (current_run.errorMessage) {
