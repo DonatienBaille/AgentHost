@@ -5,6 +5,7 @@
     <h1 class="text-3xl font-bold">{{ 'adminUsers.title' | translate }}</h1>
     <button
       type="button"
+      data-testid="new-user"
       class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
       (click)="toggleForm()"
     >
@@ -13,7 +14,7 @@
   </div>
 
   @if (error()) {
-    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+    <div data-testid="users-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
       <p class="text-red-200">{{ error() }}</p>
     </div>
   }
@@ -75,7 +76,7 @@
       </thead>
       <tbody>
         @for (user of users(); track user.id) {
-          <tr class="border-b border-gray-700 last:border-0">
+          <tr data-testid="user-row" class="border-b border-gray-700 last:border-0">
             <td class="px-4 py-2">{{ user.email }}</td>
             <td class="px-4 py-2">{{ user.displayName || '—' }}</td>
             <td class="px-4 py-2">{{ 'roles.' + user.role | translate }}</td>
@@ -86,7 +87,7 @@
     </table>
 
     @if (!isLoading() && users().length === 0) {
-      <p class="text-gray-500 text-sm p-4">{{ 'adminUsers.empty' | translate }}</p>
+      <p data-testid="users-empty" class="text-gray-500 text-sm p-4">{{ 'adminUsers.empty' | translate }}</p>
     }
   </div>
 </div>
