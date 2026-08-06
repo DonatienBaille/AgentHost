@@ -110,13 +110,29 @@ public static class RunEndpoints
         return success ? Results.Ok() : Results.BadRequest("Cannot answer for this run");
     }
 
+    /// <summary>
+    /// Annule un run. <b>200</b> quand l'arrêt du conteneur est confirmé, <b>202</b> quand le run est
+    /// marqué annulé sans que personne n'ait pu confirmer l'arrêt (aucun runner enregistré, runner
+    /// injoignable). Le 202 n'est pas cosmétique : répondre 200 dans ce cas est précisément le
+    /// mensonge silencieux que le tier runner rend courant. Le détail voyage aussi sur la
+    /// chronologie du run, en événement <c>run.cancel_unconfirmed</c>.
+    /// </summary>
     private static async Task<IResult> CancelRun(
         string id, IRunService runService, IRunRepository runRepository, ICallerContext caller, CancellationToken ct)
     {
         if (await runRepository.GetAsync(id, caller.OrgId, ct) is null) return Results.NotFound();
 
-        var success = await runService.CancelAsync(id, ct);
-        return success ? Results.Ok() : Results.BadRequest();
+        var result = await runService.CancelAsync(id, ct);
+        if (result is null) return Results.BadRequest();
+
+        return result.ContainerStopConfirmed
+            ? Results.Ok(new { cancelled = true, containerStopConfirmed = true })
+            : Results.Accepted(value: new
+            {
+                cancelled = true,
+                containerStopConfirmed = false,
+                detail = result.Detail,
+            });
     }
 
     private static async Task<IResult> GetRunEvents(
@@ -134,12 +150,27 @@ public static class RunEndpoints
         return Results.Ok(events);
     }
 
+    /// <summary>
+    /// Journaux du conteneur. <b>503</b> quand ils n'ont pas pu être obtenus — aucun runner
+    /// enregistré, runner injoignable, conteneur déjà supprimé.
+    ///
+    /// <para>Auparavant, ces cas renvoyaient 200 avec le message d'erreur <em>dans</em> le champ
+    /// <c>logs</c>, où il s'affiche comme la sortie de l'agent. Un client ne pouvait pas distinguer
+    /// « l'agent a écrit ceci » de « nous n'avons pas pu lire ». Le champ <c>logs</c> reste présent
+    /// et vide dans la réponse d'erreur, pour ne pas casser les clients qui le lisent sans regarder
+    /// le code de statut.</para>
+    /// </summary>
     private static async Task<IResult> GetRunLogs(
         string id, IContainerOrchestrator orchestrator, IRunRepository runRepository, ICallerContext caller, CancellationToken ct)
     {
         if (await runRepository.GetAsync(id, caller.OrgId, ct) is null) return Results.NotFound();
 
         var logs = await orchestrator.GetLogsAsync(id, ct);
-        return Results.Ok(new { logs });
+
+        return logs.Retrieved
+            ? Results.Ok(new { logs = logs.Content, available = true })
+            : Results.Json(
+                new { logs = string.Empty, available = false, detail = logs.Detail },
+                statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 }

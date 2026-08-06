@@ -43,6 +43,7 @@ internal sealed class RunRow
     public JsonNode? Outputs { get; set; }
 
     public string? WorkspacePath { get; set; }
+    public string? RunnerUrl { get; set; }
     public long? DurationMs { get; set; }
     public int? ExitCode { get; set; }
     public string? ErrorMessage { get; set; }
@@ -75,6 +76,7 @@ internal sealed class RunRow
         Context = run.Context,
         Outputs = run.Outputs,
         WorkspacePath = run.WorkspacePath,
+        RunnerUrl = run.RunnerUrl,
         DurationMs = run.DurationMs,
         ExitCode = run.ExitCode,
         ErrorMessage = run.ErrorMessage,
@@ -105,6 +107,7 @@ internal sealed class RunRow
         Context = Context ?? new JsonObject(),
         Outputs = Outputs,
         WorkspacePath = WorkspacePath,
+        RunnerUrl = RunnerUrl,
         DurationMs = DurationMs,
         ExitCode = ExitCode,
         ErrorMessage = ErrorMessage,

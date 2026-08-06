@@ -43,13 +43,27 @@ public interface IRunRepository
     /// by its own usage reports.
     /// </summary>
     Task<bool> SetOutputsAsync(string runId, System.Text.Json.Nodes.JsonNode? outputs, CancellationToken ct = default);
+
+    /// <summary>
+    /// Enregistre quel runner détient ce run (migration 0009). UPDATE ciblé, comme
+    /// <see cref="SetOutputsAsync"/> : il est écrit depuis le chemin de lancement, en parallèle des
+    /// transitions d'état, et n'a aucune raison d'écraser le reste de la ligne.
+    /// </summary>
+    Task<bool> SetRunnerUrlAsync(string runId, string? runnerUrl, CancellationToken ct = default);
+
+    /// <summary>
+    /// L'URL du runner détenant ce run, ou <c>null</c> quand aucun n'est enregistré. Lecture scalaire
+    /// plutôt que chargement complet : c'est la question posée sur le chemin d'annulation et de
+    /// lecture des journaux, et la seule dont la réponse serve à router.
+    /// </summary>
+    Task<string?> GetRunnerUrlAsync(string runId, CancellationToken ct = default);
 }
 
 public class RunRepository : IRunRepository
 {
     private const string SelectColumns = """
         id, org_id, project_id, number, agent_id, agent_version_id,
-        status, inputs, context, outputs, workspace_path,
+        status, inputs, context, outputs, workspace_path, runner_url,
         duration_ms, exit_code, error_message, error_code,
         budget_max_usd, budget_used_usd,
         triggered_by_user_id, triggered_by_type, parent_run_id, root_run_id,
@@ -161,14 +175,14 @@ public class RunRepository : IRunRepository
         const string sql = """
             INSERT INTO runs (
                 id, org_id, project_id, number, agent_id, agent_version_id,
-                status, inputs, context, outputs, workspace_path,
+                status, inputs, context, outputs, workspace_path, runner_url,
                 duration_ms, exit_code, error_message, error_code,
                 budget_max_usd, budget_used_usd,
                 triggered_by_user_id, triggered_by_type, parent_run_id, root_run_id,
                 created_at, started_at, finished_at, updated_at
             ) VALUES (
                 @Id, @OrgId, @ProjectId, @Number, @AgentId, @AgentVersionId,
-                @Status, @Inputs::jsonb, @Context::jsonb, @Outputs::jsonb, @WorkspacePath,
+                @Status, @Inputs::jsonb, @Context::jsonb, @Outputs::jsonb, @WorkspacePath, @RunnerUrl,
                 @DurationMs, @ExitCode, @ErrorMessage, @ErrorCode,
                 @BudgetMaxUsd, @BudgetUsedUsd,
                 @TriggeredByUserId, @TriggeredByType, @ParentRunId, @RootRunId,
@@ -249,6 +263,29 @@ public class RunRepository : IRunRepository
             sql, new { Id = runId, Outputs = outputs?.ToJsonString() }, cancellationToken: ct);
         var rows = await db.ExecuteAsync(command);
         return rows > 0;
+    }
+
+    public async Task<bool> SetRunnerUrlAsync(string runId, string? runnerUrl, CancellationToken ct = default)
+    {
+        const string sql = """
+            UPDATE runs
+            SET runner_url = @RunnerUrl,
+                updated_at = NOW()
+            WHERE id = @Id AND deleted_at IS NULL
+            """;
+
+        using var db = _connectionFactory.CreateConnection();
+        var command = new CommandDefinition(sql, new { Id = runId, RunnerUrl = runnerUrl }, cancellationToken: ct);
+        return await db.ExecuteAsync(command) > 0;
+    }
+
+    public async Task<string?> GetRunnerUrlAsync(string runId, CancellationToken ct = default)
+    {
+        const string sql = "SELECT runner_url FROM runs WHERE id = @Id AND deleted_at IS NULL";
+
+        using var db = _connectionFactory.CreateConnection();
+        var command = new CommandDefinition(sql, new { Id = runId }, cancellationToken: ct);
+        return await db.ExecuteScalarAsync<string?>(command);
     }
 
     /// <summary>

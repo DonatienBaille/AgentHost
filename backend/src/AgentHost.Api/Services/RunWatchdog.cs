@@ -115,7 +115,26 @@ public class RunWatchdog : BackgroundService
                 run.FinishedAt = now;
                 run.DurationMs = (long)(now - run.StartedAt.Value).TotalMilliseconds;
 
-                await orchestrator.StopAsync(run.Id, ct);
+                var stop = await orchestrator.StopAsync(run.Id, ct);
+                if (!stop.Confirmed)
+                {
+                    // Le run est marqué timed_out quoi qu'il arrive — sa durée maximale est dépassée,
+                    // c'est un fait. Mais si personne n'a confirmé l'arrêt du conteneur, il continue
+                    // peut-être de tourner et de consommer, et cela doit apparaître sur sa
+                    // chronologie plutôt que dans le seul journal du backend.
+                    _logger.Warning("Run {RunId} timed out but the container stop is not confirmed: {Detail}",
+                        run.Id, stop.Detail);
+
+                    await eventBus.PublishAsync(new RunEvent
+                    {
+                        RunId = run.Id,
+                        EventType = "run.stop_unconfirmed",
+                        Level = "warn",
+                        Message = "Run timed out, but no node confirmed that its container was stopped. " +
+                                  "It may still be executing.",
+                        Payload = new { outcome = stop.Outcome.ToString(), detail = stop.Detail },
+                    }, ct);
+                }
 
                 if (await stateMachine.TryTransitionAsync(run, RunStatus.TimedOut, "max duration exceeded", ct))
                 {

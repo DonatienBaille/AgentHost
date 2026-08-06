@@ -129,7 +129,33 @@ builder.Services.AddScoped<IRunService, RunService>();
 builder.Services.AddScoped<IAgentService, AgentService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IMemoryService, MemoryService>();
-builder.Services.AddScoped<IContainerOrchestrator, ContainerOrchestrator>();
+// ---- Orchestration : en processus (défaut) ou déléguée au tier runner ----
+//
+// « inprocess » est le défaut et le reste : Runner:Mode absent, vide ou inconnu vaut inprocess, de
+// sorte qu'une installation existante qui met à jour son binaire ne change strictement pas de
+// comportement. Seul le mot exact « remote » bascule, et il exige alors Runner:BaseUrl et
+// Runner:AuthToken — RunnerOptions lève au démarrage plutôt que de dégrader en silence, ce qui
+// donnerait un déploiement multi-répliques dont le contrôle des runs serait cassé sans le dire.
+//
+// Voir docs/runner.md et Services/RemoteContainerOrchestrator.cs.
+var runnerOptions = RunnerOptions.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(runnerOptions);
+
+if (runnerOptions.IsRemote)
+{
+    Log.Information("Container orchestration delegated to the runner tier at {RunnerBaseUrl}", runnerOptions.BaseUrl);
+    builder.Services.AddScoped<IContainerOrchestrator, RemoteContainerOrchestrator>();
+    builder.Services.AddHttpClient(RemoteContainerOrchestrator.HttpClientName, client =>
+    {
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runnerOptions.AuthToken);
+    });
+}
+else
+{
+    builder.Services.AddScoped<IContainerOrchestrator, ContainerOrchestrator>();
+}
+
 // Conséquences DB/état de la sortie d'un conteneur, partagées par les deux modes d'orchestration.
 builder.Services.AddSingleton<RunCompletionRecorder>();
 builder.Services.AddScoped<IEventBus, SignalREventBus>();

@@ -100,8 +100,35 @@ public sealed class RunSupervisor
             : new RunnerOutcome { Exited = false };
     }
 
-    public Task<RunnerStopResponse> StopAsync(string runId, CancellationToken ct) =>
-        _launcher.StopAsync(runId, ct);
+    /// <summary>
+    /// Arrête le conteneur du run sur ce nœud.
+    ///
+    /// <para>La subtilité est le cas « rien arrêté ». Le démon peut répondre « aucun conteneur
+    /// portant cette étiquette » pour deux raisons opposées : (a) ce nœud a bien tenu ce run et le
+    /// conteneur est déjà sorti — il n'y a rien à arrêter, tout va bien ; (b) ce nœud n'a jamais
+    /// entendu parler de ce run, parce que l'adresse enregistrée par le backend désigne désormais un
+    /// autre pod. Confondre les deux, c'est répondre « annulé » pour un conteneur qui tourne encore
+    /// ailleurs. La trace en mémoire du superviseur les sépare.</para>
+    ///
+    /// <para>Le cas (a) reste correct après un redémarrage du runner : le conteneur porte
+    /// l'étiquette, il est donc retrouvé et arrêté, et l'arrêt est confirmé sans que la mémoire ait
+    /// eu à survivre.</para>
+    /// </summary>
+    public async Task<RunnerStopResponse> StopAsync(string runId, CancellationToken ct)
+    {
+        var response = await _launcher.StopAsync(runId, ct);
+
+        if (!response.Confirmed || response.Stopped > 0 || Knows(runId))
+            return response;
+
+        return response with
+        {
+            Confirmed = false,
+            Detail =
+                $"This node has no record of run {runId} and no container carrying its label. " +
+                "It was never launched here, or this runner has restarted since. Nothing was stopped.",
+        };
+    }
 
     /// <summary>
     /// Journaux du run. Le conteneur est demandé au démon en premier ; s'il a déjà été supprimé
