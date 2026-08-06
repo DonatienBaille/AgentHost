@@ -49,7 +49,7 @@ public class InvitationTests
         var anonymous = _factory.CreateClient();
         var acceptResponse = await anonymous.PostJsonAsync("/api/invitations/accept", new AcceptInvitationRequest
         {
-            Token = created.Token,
+            Token = created.Token!,
             Password = TestData.DefaultPassword,
             DisplayName = "Invited Person",
         });
@@ -89,14 +89,14 @@ public class InvitationTests
         var anonymous = _factory.CreateClient();
         var first = await anonymous.PostJsonAsync("/api/invitations/accept", new AcceptInvitationRequest
         {
-            Token = created.Token,
+            Token = created.Token!,
             Password = TestData.DefaultPassword,
         });
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
 
         var replay = await anonymous.PostJsonAsync("/api/invitations/accept", new AcceptInvitationRequest
         {
-            Token = created.Token,
+            Token = created.Token!,
             Password = TestData.DefaultPassword,
         });
         Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
@@ -118,7 +118,7 @@ public class InvitationTests
         var anonymous = _factory.CreateClient();
         var acceptResponse = await anonymous.PostJsonAsync("/api/invitations/accept", new AcceptInvitationRequest
         {
-            Token = created.Token,
+            Token = created.Token!,
             Password = TestData.DefaultPassword,
         });
         acceptResponse.EnsureSuccessStatusCode();
@@ -157,7 +157,7 @@ public class InvitationTests
         var anonymous = _factory.CreateClient();
         var acceptResponse = await anonymous.PostJsonAsync("/api/invitations/accept", new AcceptInvitationRequest
         {
-            Token = created.Token,
+            Token = created.Token!,
             Password = TestData.DefaultPassword,
         });
         Assert.Equal(HttpStatusCode.BadRequest, acceptResponse.StatusCode);
@@ -229,7 +229,7 @@ public class InvitationTests
         var anonymous = _factory.CreateClient();
         var rejected = await anonymous.PostJsonAsync("/api/invitations/accept", new AcceptInvitationRequest
         {
-            Token = created.Token,
+            Token = created.Token!,
             Password = weakPassword,
         });
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
@@ -237,7 +237,7 @@ public class InvitationTests
         // Policy rejection must not consume the invitation.
         var accepted = await anonymous.PostJsonAsync("/api/invitations/accept", new AcceptInvitationRequest
         {
-            Token = created.Token,
+            Token = created.Token!,
             Password = TestData.DefaultPassword,
         });
         Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);

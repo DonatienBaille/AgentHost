@@ -34,13 +34,16 @@ public static class InvitationEndpoints
     }
 
     /// <summary>
-    /// Creates an invitation for an email + role in the *caller's own* organization and returns the
-    /// raw token exactly once.
+    /// Creates an invitation for an email + role in the *caller's own* organization and queues the
+    /// invitation email to that address.
     ///
-    /// NO EMAIL IS SENT. This deployment has no mailer; the token in the response is not delivered
-    /// anywhere, and it is the inviter's job to pass it to the invitee over some out-of-band
-    /// channel they trust. The server stores only a SHA-256 hash of it, so it cannot be shown
-    /// again — a lost token means revoking the invitation and creating a new one.
+    /// <b>Where the token goes depends on <c>Email:Provider</c>.</b> With a mailer configured the
+    /// invitee receives the link and the response carries no token at all. With no mailer (the
+    /// default) the raw token is returned here exactly once — it is then the only delivery channel
+    /// there is, and passing it to the invitee over a trusted out-of-band channel is the inviter's
+    /// job. Either way the server stores only a SHA-256 hash, so nothing can be shown again: a lost
+    /// invitation means revoking it and creating a new one. See
+    /// <see cref="InvitationService.CreateAsync"/>.
     ///
     /// 409 when the email already belongs to a user or already has an outstanding invitation.
     /// </summary>

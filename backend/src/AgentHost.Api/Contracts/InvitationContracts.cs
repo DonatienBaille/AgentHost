@@ -51,19 +51,25 @@ public class InvitationResponse
 }
 
 /// <summary>
-/// The response to POST /api/invitations, and the only place <see cref="Token"/> ever appears.
-/// The server keeps a SHA-256 hash, so this value is unrecoverable once the response is discarded —
-/// a lost token means revoking the invitation and issuing a new one.
+/// The response to POST /api/invitations. The server keeps only a SHA-256 hash of the token, so
+/// whatever <see cref="Token"/> carries here is unrecoverable once the response is discarded — a
+/// lost invitation means revoking it and issuing a new one.
 /// </summary>
 public class CreateInvitationResponse
 {
     public InvitationResponse Invitation { get; set; } = null!;
 
     /// <summary>
-    /// The raw invitation token, shown exactly once. There is no mailer in this system: the
-    /// inviter must deliver this to the invitee out of band.
+    /// The raw invitation token, shown exactly once — and <b>only when this deployment has no
+    /// mailer</b> (<c>Email:Provider</c> = none, the default), where handing it to the inviter for
+    /// out-of-band delivery is the only thing that makes invitations work at all.
+    ///
+    /// Null once a mailer is configured: the token then goes straight to the invitee by email, and
+    /// echoing it back would leave a credential capable of creating an account under someone
+    /// else's address sitting in the inviter's browser, logs and proxies for no purpose. See
+    /// <see cref="Services.InvitationService.CreateAsync"/>.
     /// </summary>
-    public string Token { get; set; } = string.Empty;
+    public string? Token { get; set; }
 }
 
 /// <summary>
