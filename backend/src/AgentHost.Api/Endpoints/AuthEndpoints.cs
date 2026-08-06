@@ -108,17 +108,22 @@ public static class AuthEndpoints
     /// address has an account — an endpoint that distinguishes them is a free account-enumeration
     /// oracle, and this one is anonymous and unauthenticated.
     ///
-    /// <b>NO EMAIL IS SENT.</b> This deployment has no mailer, so what happens to the minted token
-    /// depends on configuration:
+    /// When the address does have an account, the reset link is <b>queued</b> for delivery to it
+    /// (<c>Email:Provider</c> = smtp) rather than sent inline: an awaited SMTP round trip would be
+    /// slower, and fallible, precisely and only in the branch where the account exists, which
+    /// re-opens by timing and by error the enumeration oracle this flat 202 exists to close. See
+    /// <see cref="Services.Email.BackgroundEmailDispatcher"/>.
+    ///
+    /// With <c>Email:Provider</c> = none (the default) nothing is delivered — the token is stored
+    /// hashed and the raw value is discarded — and the flow stays inert, which is why the dev-only
+    /// escape hatch still exists:
     /// <list type="bullet">
     /// <item><c>Auth:ReturnResetTokenInResponse</c> = false (the default, and the only defensible
-    /// production setting): the token is stored hashed and the raw value is discarded. Nothing
-    /// reaches the user, so the reset flow is a no-op placeholder until a mailer exists. That gap
-    /// is deliberate and known — it is not a working reset flow;</item>
+    /// production setting): the raw token never leaves the server except by email;</item>
     /// <item><c>Auth:ReturnResetTokenInResponse</c> = true: the raw token comes back in this
-    /// response so development and integration tests can drive the flow. Enabling this in
-    /// production would let anybody who can name an email address take over that account, because
-    /// the caller here is anonymous by design.</item>
+    /// response so development and integration tests can drive the flow without a mail relay.
+    /// Enabling this in production would let anybody who can name an email address take over that
+    /// account, because the caller here is anonymous by design.</item>
     /// </list>
     /// </summary>
     private static async Task<IResult> RequestPasswordReset(
