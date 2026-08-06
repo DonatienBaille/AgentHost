@@ -58,27 +58,51 @@ describe('authInterceptor', () => {
     await pending;
   });
 
-  // The interceptor has no path carve-out: it signs every outgoing request whenever a token
-  // exists, auth routes included. Pinned so removing or adding a carve-out is deliberate.
-  it('also signs auth routes when a token is present — there is no path exemption', async () => {
+  // The anonymous auth endpoints authenticate from the request body, not the header. Signing them
+  // with a stale token adds nothing and, on /mfa/verify, attaches the very session the challenge
+  // is there to withhold.
+  it.each([
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/refresh',
+    '/api/auth/password-reset/request',
+    '/api/auth/password-reset/confirm',
+    '/api/auth/mfa/verify',
+  ])('does not sign the anonymous auth endpoint %s', async (path) => {
     localStorage.setItem(TOKEN_KEY, 'jwt-abc');
 
-    const pending = firstValueFrom(http.post(`${API}/api/auth/refresh`, {}));
-    const req = httpMock.expectOne(`${API}/api/auth/refresh`);
-    expect(req.request.headers.get('Authorization')).toBe('Bearer jwt-abc');
+    const pending = firstValueFrom(http.post(`${API}${path}`, {}));
+    const req = httpMock.expectOne(`${API}${path}`);
+    expect(req.request.headers.has('Authorization')).toBe(false);
     req.flush({});
     await pending;
   });
 
-  it('overwrites an Authorization header the caller set explicitly', async () => {
+  // The rest of /api/auth is RequireAuthorization on the server and breaks outright without the
+  // header, so the carve-out must stay an explicit list and never become a prefix match.
+  it.each(['/api/auth/me', '/api/auth/logout', '/api/auth/password', '/api/auth/mfa/enroll'])(
+    'still signs the authenticated auth endpoint %s',
+    async (path) => {
+      localStorage.setItem(TOKEN_KEY, 'jwt-abc');
+
+      const pending = firstValueFrom(http.post(`${API}${path}`, {}));
+      const req = httpMock.expectOne(`${API}${path}`);
+      expect(req.request.headers.get('Authorization')).toBe('Bearer jwt-abc');
+      req.flush({});
+      await pending;
+    },
+  );
+
+  it('leaves an Authorization header the caller set explicitly', async () => {
     localStorage.setItem(TOKEN_KEY, 'jwt-abc');
 
     const pending = firstValueFrom(
       http.get(`${API}/api/projects`, { headers: { Authorization: 'Basic caller' } }),
     );
     const req = httpMock.expectOne(`${API}/api/projects`);
-    // setHeaders overwrites: the stored token wins.
-    expect(req.request.headers.get('Authorization')).toBe('Bearer jwt-abc');
+    // The deliberate header wins — this is how errorInterceptor replays with a freshly refreshed
+    // token while localStorage may still hold the one that just 401'd.
+    expect(req.request.headers.get('Authorization')).toBe('Basic caller');
     req.flush([]);
     await pending;
   });

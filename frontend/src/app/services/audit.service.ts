@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuditLogEntry } from '../core/models';
+import { clampSkip, clampTake } from '../core/utils/paging';
 
 @Injectable({ providedIn: 'root' })
 export class AuditService {
@@ -17,7 +18,7 @@ export class AuditService {
     try {
       const data = await firstValueFrom(
         this.http.get<AuditLogEntry[]>(
-          `${environment.apiUrl}/api/organizations/${orgId}/audit-log?skip=${skip}&take=${take}`,
+          `${environment.apiUrl}/api/organizations/${orgId}/audit-log?skip=${clampSkip(skip)}&take=${clampTake(take)}`,
         ),
       );
       this.entries.set(data ?? []);

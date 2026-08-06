@@ -28,6 +28,7 @@ class SignalRServiceStub {
   readonly onMemoryLoaded$ = new Subject<ProjectMemory>();
   readonly onMemoryUpdated$ = new Subject<MemoryUpdate>();
   joinProjectMemory = vi.fn(async (_projectId: string) => {});
+  leaveProjectMemory = vi.fn(async (_projectId: string) => {});
   updateMemory = vi.fn(async (_projectId: string, _update: MemoryUpdate) => {});
 }
 
@@ -125,6 +126,60 @@ describe('MemoryService', () => {
 
     signalR.onMemoryLoaded$.next(memory('p1', 'ignored'));
 
+    expect(service.memory()?.notes[0].text).toBe('a');
+  });
+
+  it('dispose leaves the hub group and forgets the project', async () => {
+    await service.load('p1');
+    service.dispose();
+    await Promise.resolve();
+
+    expect(signalR.leaveProjectMemory).toHaveBeenCalledWith('p1');
+
+    // Forgetting matters: a pushUpdate that survives teardown would otherwise write into whichever
+    // project happened to be loaded last.
+    await service.pushUpdate({ note: { text: 'stray' } });
+    expect(signalR.updateMemory).not.toHaveBeenCalled();
+  });
+
+  it('dispose is a no-op before any project is loaded', () => {
+    service.dispose();
+    expect(signalR.leaveProjectMemory).not.toHaveBeenCalled();
+  });
+
+  it('a failing group departure does not escape dispose', async () => {
+    signalR.leaveProjectMemory.mockRejectedValueOnce(new Error('socket gone'));
+    await service.load('p1');
+
+    expect(() => service.dispose()).not.toThrow();
+    await Promise.resolve();
+  });
+
+  it('switching projects gives up the previous group', async () => {
+    await service.load('p1');
+    await service.load('p2');
+
+    expect(signalR.leaveProjectMemory).toHaveBeenCalledExactlyOnceWith('p1');
+    expect(signalR.joinProjectMemory).toHaveBeenNthCalledWith(2, 'p2');
+  });
+
+  it('reloading the same project does not churn the group membership', async () => {
+    await service.load('p1');
+    await service.load('p1');
+
+    expect(signalR.leaveProjectMemory).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a failed refetch instead of dropping it as an unhandled rejection', async () => {
+    await service.load('p1');
+    projects.fetchMemory.mockRejectedValueOnce(new Error('boom'));
+
+    signalR.onMemoryUpdated$.next({ note: { text: 'x' } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(service.error()).toBe('Failed to load memory for project p1');
+    // The stale snapshot is still on screen — which is exactly why the error must be visible.
     expect(service.memory()?.notes[0].text).toBe('a');
   });
 });

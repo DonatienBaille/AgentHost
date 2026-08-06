@@ -75,11 +75,17 @@ describe('RunService', () => {
       expect(service.runs()).toEqual([]);
     });
 
-    // The backend clamps take to 200; the client does not pre-clamp, so a larger take goes out
-    // as-is. Pinned so a future client-side clamp is a deliberate change, not a silent one.
-    it('does not clamp take client-side — the server enforces the 200 cap', async () => {
+    // The server clamps take to 200 silently. Clamping here too keeps the requested page size
+    // equal to the delivered one, so a caller advancing by `take` cannot skip rows it never saw.
+    it('clamps take to the servers 200 cap before sending', async () => {
       const pending = service.listRuns(0, 1000);
-      httpMock.expectOne(`${URL}?skip=0&take=1000`).flush([]);
+      httpMock.expectOne(`${URL}?skip=0&take=200`).flush([]);
+      await pending;
+    });
+
+    it('floors a negative skip and a non-positive take', async () => {
+      const pending = service.listRuns(-10, 0);
+      httpMock.expectOne(`${URL}?skip=0&take=1`).flush([]);
       await pending;
     });
 

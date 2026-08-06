@@ -57,11 +57,17 @@ describe('AuditService', () => {
     expect(service.entries()).toEqual([]);
   });
 
-  // The backend clamps take to 200; the client sends what it is given. Pinned so that adding a
-  // client-side clamp is a deliberate change.
-  it('does not clamp take client-side — the server enforces the 200 cap', async () => {
+  // The server clamps take to 200 silently, so the client clamps too — otherwise a caller that
+  // asked for 1000 and advanced by 1000 would step over the 800 rows it never received.
+  it('clamps take to the servers 200 cap before sending', async () => {
     const pending = service.listAuditLog('o1', 0, 1000);
-    httpMock.expectOne(url('o1', 0, 1000)).flush([]);
+    httpMock.expectOne(url('o1', 0, 200)).flush([]);
+    await pending;
+  });
+
+  it('floors a negative skip and a non-positive take', async () => {
+    const pending = service.listAuditLog('o1', -5, 0);
+    httpMock.expectOne(url('o1', 0, 1)).flush([]);
     await pending;
   });
 

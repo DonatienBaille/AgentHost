@@ -2,6 +2,7 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
+import { clampSkip, clampTake } from '../core/utils/paging';
 import {
   AnswerQuestionRequest,
   Approval,
@@ -74,7 +75,7 @@ export class RunService {
     this.isLoading.set(true);
     try {
       const data = await firstValueFrom(
-        this.http.get<Run[]>(`${BASE_URL}?skip=${skip}&take=${take}`),
+        this.http.get<Run[]>(`${BASE_URL}?skip=${clampSkip(skip)}&take=${clampTake(take)}`),
       );
       this.runs.set(data ?? []);
       this.error.set(null);

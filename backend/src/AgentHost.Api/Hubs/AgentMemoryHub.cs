@@ -37,6 +37,16 @@ public class AgentMemoryHub : Hub
         await Clients.Caller.SendAsync("memoryLoaded", memory);
     }
 
+    /// <summary>
+    /// Drops the caller's connection from a project's memory group. Deliberately unauthorized:
+    /// giving up your own group membership is not a privileged act, it only ever affects
+    /// <c>Context.ConnectionId</c>, and leaving a group you never joined is a no-op. Running the
+    /// project check here would instead answer "does this project exist" to a caller who has
+    /// nothing at stake, which is exactly what <see cref="IsAuthorizedForProjectAsync"/> avoids.
+    /// </summary>
+    public Task LeaveProjectMemory(string projectId) =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, $"memory-{projectId}");
+
     public async Task UpdateMemory(string projectId, MemoryUpdate update)
     {
         if (!await IsAuthorizedForProjectAsync(projectId)) return;

@@ -21,6 +21,24 @@ export const REGISTER_PATH = `${BASE_URL}/register`;
 export const REFRESH_PATH = `${BASE_URL}/refresh`;
 export const LOGOUT_PATH = `${BASE_URL}/logout`;
 
+/**
+ * The auth endpoints the server maps `AllowAnonymous` — credential *exchanges*, where the caller
+ * proves itself with what is in the body (password, refresh token, reset token, MFA code) and a
+ * stored access token means nothing.
+ *
+ * Deliberately an explicit list rather than a `/api/auth/*` prefix: the rest of that group —
+ * `/me`, `/logout`, `/password`, `/mfa/enroll|confirm|disable` — is `RequireAuthorization` and
+ * breaks outright without the Bearer header.
+ */
+export const ANONYMOUS_AUTH_PATHS = [
+  LOGIN_PATH,
+  REGISTER_PATH,
+  REFRESH_PATH,
+  `${BASE_URL}/password-reset/request`,
+  `${BASE_URL}/password-reset/confirm`,
+  `${BASE_URL}/mfa/verify`,
+];
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly http = inject(HttpClient);

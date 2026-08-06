@@ -10,7 +10,13 @@ import { environment } from '../../environments/environment';
  * signal moves. Behaviour that only appears against a real hub (transport negotiation, automatic
  * reconnect timing, server-side group semantics) is left to the E2E wave.
  */
-const hoisted = vi.hoisted(() => ({ connections: [] as FakeConnection[] }));
+const hoisted = vi.hoisted(() => ({
+  connections: [] as FakeConnection[],
+  /** When true, every connection built from now on parks in Connecting until released. */
+  deferStarts: false,
+  /** When true, `start()` rejects — the transport refusing the handshake. */
+  failStarts: false,
+}));
 
 interface FakeConnection {
   url: string;
@@ -23,6 +29,7 @@ interface FakeConnection {
   fireReconnecting(): void;
   fireReconnected(): void;
   fireClose(): void;
+  releaseStart(): void;
 }
 
 vi.mock('@microsoft/signalr', () => {
@@ -63,15 +70,36 @@ vi.mock('@microsoft/signalr', () => {
     onclose(cb: () => void): void {
       this.closed.push(cb);
     }
+    private startGate: (() => void) | null = null;
+    private deferred = hoisted.deferStarts;
+
     async start(): Promise<void> {
       this.startCount++;
+      this.state = HubConnectionState.Connecting;
+      if (this.deferred) {
+        this.deferred = false;
+        await new Promise<void>((resolve) => (this.startGate = resolve));
+      }
+      if (hoisted.failStarts) {
+        this.state = HubConnectionState.Disconnected;
+        throw new Error('handshake refused');
+      }
       this.state = HubConnectionState.Connected;
+    }
+    releaseStart(): void {
+      this.startGate?.();
+      this.startGate = null;
     }
     async stop(): Promise<void> {
       this.stopCount++;
       this.state = HubConnectionState.Disconnected;
     }
     async invoke(method: string, ...args: unknown[]): Promise<void> {
+      // The real client refuses to send on anything but a Connected hub. Reproducing that here is
+      // the whole point: without it, handing a caller a Connecting/Reconnecting hub looks fine.
+      if (this.state !== HubConnectionState.Connected) {
+        throw new Error(`Cannot send data if the connection is not in the 'Connected' state.`);
+      }
       this.invocations.push({ method, args });
     }
 
@@ -120,6 +148,8 @@ describe('SignalRService', () => {
 
   beforeEach(() => {
     hoisted.connections.length = 0;
+    hoisted.deferStarts = false;
+    hoisted.failStarts = false;
     localStorage.clear();
     TestBed.configureTestingModule({});
     service = TestBed.inject(SignalRService);
@@ -127,7 +157,106 @@ describe('SignalRService', () => {
 
   afterEach(() => {
     hoisted.connections.length = 0;
+    hoisted.deferStarts = false;
+    hoisted.failStarts = false;
     localStorage.clear();
+  });
+
+  /** Lets pending microtasks drain so a "did nothing yet" assertion is not merely early. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /**
+   * The transient states. `start()` is legal only from Disconnected and is the sole awaitable the
+   * client offers, so a hub in Connecting (someone else's start) or Reconnecting (automatic
+   * reconnect) has to be *waited on*. Returning it early is what made `invoke()` throw.
+   */
+  describe('transient connection states', () => {
+    it('a concurrent caller waits for the in-flight start instead of invoking mid-handshake', async () => {
+      hoisted.deferStarts = true;
+
+      const first = service.joinRun('r1');
+      const second = service.joinRun('r2');
+      await settle();
+
+      // One handshake for both callers, and neither has been handed a half-open hub.
+      expect(conns().length).toBe(1);
+      expect(conns()[0].startCount).toBe(1);
+      expect(conns()[0].state).toBe('Connecting');
+      expect(conns()[0].invocations).toEqual([]);
+
+      conns()[0].releaseStart();
+      await Promise.all([first, second]);
+
+      expect(conns()[0].startCount).toBe(1);
+      expect(conns()[0].invocations).toEqual([
+        { method: 'JoinRun', args: ['r1'] },
+        { method: 'JoinRun', args: ['r2'] },
+      ]);
+    });
+
+    it('waits for an automatic reconnect to succeed before invoking', async () => {
+      await service.connect();
+      const conn = conns()[0];
+      conn.fireReconnecting();
+
+      const pending = service.joinRun('r1');
+      await settle();
+      expect(conn.invocations).toEqual([]);
+      expect(service.connectionState()).toBe('connecting');
+
+      conn.fireReconnected();
+      await pending;
+
+      // The client reconnected on its own: no second start(), and the invocation went through.
+      expect(conn.startCount).toBe(1);
+      expect(conn.invocations).toEqual([{ method: 'JoinRun', args: ['r1'] }]);
+    });
+
+    it('starts the hub itself when the automatic reconnect gives up and closes', async () => {
+      await service.connect();
+      const conn = conns()[0];
+      conn.fireReconnecting();
+
+      const pending = service.joinRun('r1');
+      await settle();
+      expect(conn.invocations).toEqual([]);
+
+      conn.fireClose();
+      await pending;
+
+      expect(conn.startCount).toBe(2);
+      expect(conn.invocations).toEqual([{ method: 'JoinRun', args: ['r1'] }]);
+      expect(service.connectionState()).toBe('connected');
+    });
+
+    it('applies to the project and memory hubs too', async () => {
+      hoisted.deferStarts = true;
+
+      const joins = [service.joinProject('p1'), service.joinProjectMemory('p1')];
+      await settle();
+      expect(conns().length).toBe(2);
+      conns().forEach((c) => expect(c.invocations).toEqual([]));
+
+      conns().forEach((c) => c.releaseStart());
+      await Promise.all(joins);
+
+      expect(conns()[0].invocations).toEqual([{ method: 'JoinProject', args: ['p1'] }]);
+      expect(conns()[1].invocations).toEqual([{ method: 'JoinProjectMemory', args: ['p1'] }]);
+    });
+
+    it('reports a failed start instead of leaving the signal stuck on connecting', async () => {
+      hoisted.failStarts = true;
+
+      await expect(service.connect()).rejects.toThrow('handshake refused');
+      expect(service.connectionState()).toBe('disconnected');
+
+      // And the failure is not sticky: the shared start promise was released, so a later call
+      // reaches the hub rather than replaying the rejection forever.
+      hoisted.failStarts = false;
+      await service.joinRun('r1');
+      expect(conns()[0].startCount).toBe(2);
+      expect(conns()[0].invocations).toEqual([{ method: 'JoinRun', args: ['r1'] }]);
+    });
   });
 
   describe('RunHub', () => {
@@ -355,6 +484,23 @@ describe('SignalRService', () => {
         method: 'UpdateMemory',
         args: ['p1', { note: { text: 'hello' } }],
       });
+    });
+
+    it('leaveProjectMemory invokes only when connected', async () => {
+      // Never connected: nothing is built, so no group membership is invented to give up.
+      await service.leaveProjectMemory('p1');
+      expect(conns().length).toBe(0);
+
+      await service.joinProjectMemory('p1');
+      await service.leaveProjectMemory('p1');
+      expect(conns()[0].invocations.map((i) => i.method)).toEqual([
+        'JoinProjectMemory',
+        'LeaveProjectMemory',
+      ]);
+
+      await service.disconnectMemory();
+      await service.leaveProjectMemory('p1');
+      expect(conns()[0].invocations.length).toBe(2);
     });
 
     it('reuses one memory connection across joins and reconnects it after disconnect', async () => {
