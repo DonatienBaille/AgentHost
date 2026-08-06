@@ -47,6 +47,12 @@ TOKEN="$(cat /run/secrets/GITHUB_TOKEN)"
 The host deletes the whole `/run/secrets` backing directory as soon as the container exits, so a
 secret is only readable for the lifetime of the run.
 
+> Executed, not just documented: `ContainerLifecycleTests` (backend test suite) launches a real
+> container whose agent reads `/run/secrets/<NAME>`, compares it byte-for-byte with the value stored
+> through `POST /api/secrets`, and refuses to continue if any `SECRET_*` variable exists in its
+> environment; the host then re-checks the daemon's own view of the container config and asserts the
+> plaintext directory is gone after the exit. It runs in CI, and skips where no daemon is reachable.
+
 ### Filesystem
 
 The workspace is bind-mounted read-write at `/workspace`; the host's path for it is recorded in
@@ -89,6 +95,11 @@ Properties that matter:
   configurable via `Jwt:RunTokenMarginSeconds`), so a winding-down agent can still post its final
   events after the run's own deadline.
 * Not persisted anywhere and never returned by the REST API.
+
+Every property above is covered by tests that call the endpoints directly, and the token's basic
+use — a container posting an event with the `AGENTHOST_RUN_TOKEN` it was launched with, over the
+network, from inside its own namespace — is additionally executed once by `ContainerLifecycleTests`
+against a real daemon. The run-scoping and error cases are covered by the direct tests only.
 
 Error responses: `401` (missing/invalid/expired token), `403` (valid token, wrong run),
 `404` (run or approval does not exist), `409` (the run is not in a state that allows the call),
