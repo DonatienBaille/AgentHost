@@ -8,6 +8,7 @@ using AgentHost.Api.Infrastructure.Storage;
 using AgentHost.Api.Repositories;
 using AgentHost.Api.Services;
 using AgentHost.Api.Services.Email;
+using AgentHost.Shared.Containers;
 using Docker.DotNet;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -83,6 +84,11 @@ if (containerPathMapper.RemapsPaths)
 }
 builder.Services.AddSingleton(containerPathMapper);
 
+// La plomberie conteneur elle-même (AgentHost.Shared) : le même objet sert au mode inprocess ici
+// et au tier runner dans AgentHost.Runner. Sans état propre, donc singleton.
+builder.Services.AddSingleton(ContainerLauncherOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddSingleton<ContainerLauncher>();
+
 // ---- Artifact storage: local disk (default) or any S3-compatible object store ----
 // Resolved eagerly so a broken S3 configuration fails at startup with the full list of problems,
 // rather than on the first upload with one symptom.
@@ -124,6 +130,8 @@ builder.Services.AddScoped<IAgentService, AgentService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IMemoryService, MemoryService>();
 builder.Services.AddScoped<IContainerOrchestrator, ContainerOrchestrator>();
+// Conséquences DB/état de la sortie d'un conteneur, partagées par les deux modes d'orchestration.
+builder.Services.AddSingleton<RunCompletionRecorder>();
 builder.Services.AddScoped<IEventBus, SignalREventBus>();
 builder.Services.AddScoped<RunStateMachine>();
 builder.Services.AddScoped<ISecretsBroker, SecretsBroker>();

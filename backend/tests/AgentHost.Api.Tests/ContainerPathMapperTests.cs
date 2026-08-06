@@ -1,3 +1,4 @@
+using AgentHost.Shared.Containers;
 using AgentHost.Api.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Xunit;

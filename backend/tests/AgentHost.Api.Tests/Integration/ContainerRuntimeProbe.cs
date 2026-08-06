@@ -1,3 +1,4 @@
+using AgentHost.Shared.Containers;
 using AgentHost.Api.Infrastructure;
 using Docker.DotNet;
 using Microsoft.Extensions.Configuration;

@@ -1,6 +1,6 @@
 using Serilog;
 
-namespace AgentHost.Api.Services;
+namespace AgentHost.Shared.Containers;
 
 /// <summary>
 /// Le mode réseau et l'environnement proxy d'un conteneur, dérivés de

@@ -1,3 +1,4 @@
+using AgentHost.Shared.Containers;
 using AgentHost.Api.Services;
 using Serilog;
 using Xunit;
