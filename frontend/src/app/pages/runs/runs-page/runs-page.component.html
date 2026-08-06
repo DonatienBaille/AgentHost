@@ -6,7 +6,7 @@
   </div>
 
   @if (error()) {
-    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+    <div data-testid="runs-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
       <p class="text-red-200">{{ error() }}</p>
     </div>
   }
@@ -14,27 +14,28 @@
   <div class="grid gap-4 sm:grid-cols-3 mb-8">
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
       <div class="text-sm text-gray-400">{{ 'runs.total' | translate }}</div>
-      <div class="text-3xl font-bold mt-1">{{ runCount() }}</div>
+      <div data-testid="stat-total" class="text-3xl font-bold mt-1">{{ runCount() }}</div>
     </div>
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
       <div class="text-sm text-gray-400">{{ 'runs.successRate' | translate }}</div>
-      <div class="text-3xl font-bold mt-1 text-green-400">{{ successRate() | number: '1.0-0' }}%</div>
+      <div data-testid="stat-success-rate" class="text-3xl font-bold mt-1 text-green-400">{{ successRate() | number: '1.0-0' }}%</div>
     </div>
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
       <div class="text-sm text-gray-400">{{ 'runs.failed' | translate }}</div>
-      <div class="text-3xl font-bold mt-1 text-red-400">{{ failedRuns() }}</div>
+      <div data-testid="stat-failed" class="text-3xl font-bold mt-1 text-red-400">{{ failedRuns() }}</div>
     </div>
   </div>
 
   @if (isLoading()) {
     <div class="flex justify-center py-8">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      <div data-testid="runs-spinner" class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
     </div>
   }
 
   <div class="space-y-2">
     @for (run of runs(); track run.id) {
       <a
+        data-testid="run-card"
         [routerLink]="['/runs', run.id]"
         class="flex items-center justify-between bg-gray-800 border border-gray-700 rounded-lg p-3 hover:border-blue-500 transition"
       >
@@ -52,7 +53,7 @@
     }
 
     @if (!isLoading() && runs().length === 0) {
-      <p class="text-gray-500 text-sm py-4">{{ 'runs.empty' | translate }}</p>
+      <p data-testid="runs-empty" class="text-gray-500 text-sm py-4">{{ 'runs.empty' | translate }}</p>
     }
   </div>
 </div>
