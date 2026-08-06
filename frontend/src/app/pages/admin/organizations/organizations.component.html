@@ -6,6 +6,7 @@
     @if (isOwner()) {
       <button
         type="button"
+        data-testid="new-org"
         class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
         (click)="toggleForm()"
       >
@@ -15,13 +16,13 @@
   </div>
 
   @if (!isOwner()) {
-    <div class="bg-yellow-900/50 border border-yellow-700 rounded-lg p-4 mb-6">
+    <div data-testid="orgs-owner-only" class="bg-yellow-900/50 border border-yellow-700 rounded-lg p-4 mb-6">
       <p class="text-yellow-200 text-sm">{{ 'adminOrgs.ownerOnly' | translate }}</p>
     </div>
   }
 
   @if (error()) {
-    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+    <div data-testid="orgs-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
       <p class="text-red-200">{{ error() }}</p>
     </div>
   }
@@ -80,7 +81,7 @@
       </thead>
       <tbody>
         @for (org of organizations(); track org.id) {
-          <tr class="border-b border-gray-700 last:border-0">
+          <tr data-testid="org-row" class="border-b border-gray-700 last:border-0">
             <td class="px-4 py-2">{{ org.name }}</td>
             <td class="px-4 py-2 font-mono text-xs">{{ org.slug }}</td>
             <td class="px-4 py-2">{{ org.plan }}</td>
@@ -91,7 +92,7 @@
     </table>
 
     @if (!isLoading() && organizations().length === 0) {
-      <p class="text-gray-500 text-sm p-4">{{ 'adminOrgs.empty' | translate }}</p>
+      <p data-testid="orgs-empty" class="text-gray-500 text-sm p-4">{{ 'adminOrgs.empty' | translate }}</p>
     }
   </div>
 </div>
