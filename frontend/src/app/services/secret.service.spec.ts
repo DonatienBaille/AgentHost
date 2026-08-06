@@ -84,4 +84,67 @@ describe('SecretService', () => {
 
     expect(service.secrets().length).toBe(1);
   });
+
+  // REGRESSION: assert on the body's own key set, so a reintroduced identity field is caught
+  // even if every expected field is still present.
+  it('createSecret never sends orgId or a client-supplied identity field in the body', async () => {
+    const pending = service.createSecret({
+      name: 'API_KEY',
+      value: 'v',
+      scope: 'project',
+      projectId: 'p1',
+    });
+    const req = httpMock.expectOne(URL);
+    const keys = Object.keys(req.request.body as object);
+    expect(keys).not.toContain('orgId');
+    expect(keys).not.toContain('organizationId');
+    expect(keys).not.toContain('createdByUserId');
+    expect(keys).not.toContain('userId');
+    req.flush(secret('s1', 'API_KEY'));
+    await pending;
+  });
+
+  it('rotateSecret sends the value alone — no identity fields', async () => {
+    const pending = service.rotateSecret('s1', 'v2');
+    const req = httpMock.expectOne(`${URL}/s1`);
+    const keys = Object.keys(req.request.body as object);
+    expect(keys).toEqual(['value']);
+    expect(keys).not.toContain('rotatedByUserId');
+    req.flush(secret('s1', 'API_KEY'));
+    await pending;
+  });
+
+  it('getSecret GETs the single resource', async () => {
+    const pending = service.getSecret('s1');
+    const req = httpMock.expectOne(`${URL}/s1`);
+    expect(req.request.method).toBe('GET');
+    req.flush(secret('s1', 'API_KEY'));
+    expect((await pending).id).toBe('s1');
+  });
+
+  it('deleteSecret DELETEs and drops the row locally', async () => {
+    const seed = service.listSecrets();
+    httpMock.expectOne(URL).flush([secret('s1', 'A'), secret('s2', 'B')]);
+    await seed;
+
+    const pending = service.deleteSecret('s1');
+    const req = httpMock.expectOne(`${URL}/s1`);
+    expect(req.request.method).toBe('DELETE');
+    req.flush(null);
+    await pending;
+
+    expect(service.secrets().map((s) => s.id)).toEqual(['s2']);
+  });
+
+  it('propagates a delete failure and leaves local state untouched', async () => {
+    const seed = service.listSecrets();
+    httpMock.expectOne(URL).flush([secret('s1', 'A')]);
+    await seed;
+
+    const pending = service.deleteSecret('s1');
+    httpMock.expectOne(`${URL}/s1`).flush(null, { status: 403, statusText: 'Forbidden' });
+
+    await expect(pending).rejects.toBeTruthy();
+    expect(service.secrets().map((s) => s.id)).toEqual(['s1']);
+  });
 });
