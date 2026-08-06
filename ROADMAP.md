@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-293 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
+310 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
 contient** concrètement, et **à quoi on reconnaît qu'il est fini**. L'ordre est un défaut
@@ -237,13 +237,25 @@ ce mois-ci, lesquels échouent, et vais-je dépasser mon budget ? »
 
 ## Dette identifiée, hors lots
 
-Petits éléments à traiter au fil de l'eau, chacun documenté à son emplacement dans le code :
+Traité :
 
-- Le flux de réinitialisation de mot de passe reste **inerte en production** tant qu'un mailer
-  n'est pas branché (en cours).
-- `audit_log` n'est pas append-only malgré l'exigence WORM de la spec (en cours).
-- Pas de rotation de la clé de chiffrement des secrets : une fuite impose un rechiffrement manuel
-  (en cours).
-- Pas de stratégie de sauvegarde/restauration Postgres documentée (en cours).
+- ✅ **`audit_log` est append-only** (migration `0008`) : trois triggers refusent `UPDATE`, `DELETE`
+  et `TRUNCATE`. Vérifié contre une vraie base, et vérifié que les triggers survivent à une
+  restauration de sauvegarde. Limite assumée et documentée : le propriétaire de la table peut
+  désactiver un trigger, et l'application est aujourd'hui propriétaire — un WORM réel demande une
+  séparation de rôles qui relève du déploiement.
+- ✅ **Rotation de la clé de chiffrement des secrets** : `Secrets:PreviousEncryptionKeys` accepte les
+  anciennes clés en déchiffrement, `dotnet AgentHost.Api.dll --rekey-secrets` réécrit l'existant.
+  Couvre les deux colonnes chiffrées, y compris les seeds TOTP — en oublier une verrouillerait tous
+  les comptes à second facteur. Idempotent, et ne détruit jamais une valeur qu'il ne sait pas lire.
+- ✅ **Sauvegarde et restauration** : `scripts/backup.sh`, `scripts/restore.sh` et
+  [docs/operations.md](docs/operations.md). Les deux scripts ont été exécutés contre une vraie base.
+
+Reste à traiter :
+
+- Le flux de réinitialisation de mot de passe reste **inerte en production** tant qu'un mailer n'est
+  pas branché (en cours).
 - Aucun test de charge : le comportement sous concurrence est inconnu.
 - Pas de suppression en cascade au-delà du soft-delete organisation/projet (purge RGPD réelle).
+- Pas de réplication ni de restauration à un instant précis (PITR) — voir §6 de
+  [docs/operations.md](docs/operations.md).

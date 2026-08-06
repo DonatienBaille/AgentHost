@@ -126,6 +126,7 @@ builder.Services.AddScoped<IContainerOrchestrator, ContainerOrchestrator>();
 builder.Services.AddScoped<IEventBus, SignalREventBus>();
 builder.Services.AddScoped<RunStateMachine>();
 builder.Services.AddScoped<ISecretsBroker, SecretsBroker>();
+builder.Services.AddScoped<ISecretsRekeyService, SecretsRekeyService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAuthTokenIssuer, AuthTokenIssuer>();
@@ -399,6 +400,28 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+// ---- Mode maintenance : rechiffrement des secrets (rotation de clé) ----
+//
+// `dotnet AgentHost.Api.dll --rekey-secrets` réécrit tout le matériel chiffré avec
+// Secrets:EncryptionKey, puis sort sans jamais écouter sur le réseau. C'est une opération
+// d'exploitation portant sur l'instance entière — pas sur une organisation — donc elle n'a rien à
+// faire derrière une API scopée par tenant : il n'y a pas d'appelant à autoriser, pas de délai de
+// requête à respecter, et rien à exposer.
+//
+// Placé après les migrations pour que le schéma soit à jour, et avant tout middleware.
+if (args.Contains("--rekey-secrets"))
+{
+    using var rekeyScope = app.Services.CreateScope();
+    var rekey = rekeyScope.ServiceProvider.GetRequiredService<ISecretsRekeyService>();
+
+    var report = await rekey.RekeyAllAsync();
+    await Log.CloseAndFlushAsync();
+
+    // Code de sortie non nul si quoi que ce soit a échoué : un script d'exploitation doit pouvoir
+    // s'arrêter là plutôt que d'enchaîner sur le retrait de l'ancienne clé.
+    return report.Failed == 0 ? 0 : 1;
+}
+
 // Must run before anything that reads the client IP or scheme (rate limiter partitions, logs).
 app.UseForwardedHeaders();
 
@@ -453,6 +476,10 @@ app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }
 app.MapPrometheusScrapingEndpoint("/metrics").AllowAnonymous().DisableRateLimiting();
 
 app.Run();
+
+// Le mode --rekey-secrets rend plus haut ; ce retour est le chemin normal (app.Run bloque
+// jusqu'à l'arrêt), et il donne au programme un type de retour cohérent.
+return 0;
 
 /// <summary>
 /// Builds the artifact storage backend from <c>Artifacts:Provider</c> (<c>local</c> by default,
