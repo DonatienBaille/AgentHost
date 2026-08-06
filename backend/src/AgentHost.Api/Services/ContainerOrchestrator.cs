@@ -64,9 +64,11 @@ public class ContainerOrchestrator : IContainerOrchestrator
     private readonly ILogger _logger;
     private readonly ContainerPathMapper _paths;
     private readonly string[] _dns;
+    private readonly string? _containerRuntime;
     private readonly string? _egressProxy;
     private readonly string _noProxy;
     private readonly string? _allowlistNetwork;
+    private readonly bool _allowUnconfinedAllowlist;
     private readonly int _tmpfsSizeMb;
     private readonly string[] _securityOpt;
 
@@ -94,9 +96,11 @@ public class ContainerOrchestrator : IContainerOrchestrator
         // A sovereign/on-prem deployment sets Docker:Dns:0/1/... to its internal resolvers; no
         // public third-party resolver is ever used implicitly.
         _dns = config.GetSection("Docker:Dns").Get<string[]>() ?? Array.Empty<string>();
+        _containerRuntime = NullIfBlank(config["Docker:Runtime"]);
         _egressProxy = config["Docker:EgressProxy"];
         _noProxy = config["Docker:NoProxy"] ?? "localhost,127.0.0.1,::1";
-        _allowlistNetwork = config["Docker:AllowlistNetwork"];
+        _allowlistNetwork = NullIfBlank(config["Docker:AllowlistNetwork"]);
+        _allowUnconfinedAllowlist = bool.TryParse(config["Docker:AllowUnconfinedAllowlist"], out var unconfined) && unconfined;
         _tmpfsSizeMb = int.TryParse(config["Docker:TmpfsSizeMb"], out var mb) && mb > 0 ? mb : 64;
         _securityOpt = ResolveSecurityOpt(config);
     }
@@ -249,6 +253,14 @@ public class ContainerOrchestrator : IContainerOrchestrator
 
                         // Security (spec section 13.2)
                         SecurityOpt = _securityOpt,
+
+                        // Isolated runtime (gVisor "runsc", Kata "kata-runtime", "sysbox-runc").
+                        // Empty = the daemon's default (runc), which shares the host kernel: a
+                        // container escape is a host compromise. For a platform whose business is
+                        // running third-party code this is the structural mitigation, and it costs
+                        // one field — but the runtime must be installed and registered with the
+                        // daemon first, so it cannot be the default here.
+                        Runtime = _containerRuntime,
                         // Upper-case "ALL": both engines normalize capability names, but Podman's
                         // compat path compares the drop-everything sentinel case-sensitively in
                         // places, and "ALL" is the spelling both accept.
@@ -322,59 +334,18 @@ public class ContainerOrchestrator : IContainerOrchestrator
 
     /// <summary>
     /// Maps <c>spec.permissions.network</c> onto a Docker network mode plus the proxy environment
-    /// the container needs. See the class remarks for what "allowlist" does and does not enforce.
+    /// the container needs. The decision itself lives in <see cref="NetworkPolicyResolver"/> — it is
+    /// policy, not Docker plumbing, and keeping it separate is what makes it directly testable.
     /// </summary>
-    private NetworkPolicy ResolveNetworkPolicy(string? requested, AgentContainerPolicy policy, string runId)
-    {
-        switch (requested)
-        {
-            case "full":
-                return new NetworkPolicy("bridge", true, Array.Empty<string>(), Array.Empty<string>());
+    private NetworkPolicy ResolveNetworkPolicy(string? requested, AgentContainerPolicy policy, string runId) =>
+        NetworkPolicyResolver.Resolve(
+            requested, policy.NetworkAllowlist, runId,
+            new NetworkPolicyResolver.Settings(_egressProxy, _allowlistNetwork, _noProxy, _allowUnconfinedAllowlist),
+            _logger);
 
-            case "allowlist" when string.IsNullOrWhiteSpace(_egressProxy):
-                // Fail closed. Pretending "allowlist" is satisfied by an unfiltered bridge would be
-                // strictly worse than no network, because the manifest author asked for filtering.
-                _logger.Warning(
-                    "Run {RunId} requests network=allowlist but Docker:EgressProxy is not configured; " +
-                    "starting the container with NO network rather than granting unfiltered egress",
-                    runId);
-                return new NetworkPolicy("none", false, Array.Empty<string>(), policy.NetworkAllowlist);
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-            case "allowlist" when policy.NetworkAllowlist.Count == 0:
-                _logger.Warning(
-                    "Run {RunId} requests network=allowlist but spec.permissions.networkAllowlist is empty; " +
-                    "starting the container with NO network (nothing is allowed)",
-                    runId);
-                return new NetworkPolicy("none", false, Array.Empty<string>(), policy.NetworkAllowlist);
-
-            case "allowlist":
-            {
-                var joined = string.Join(",", policy.NetworkAllowlist);
-                var env = new[]
-                {
-                    $"HTTP_PROXY={_egressProxy}",
-                    $"http_proxy={_egressProxy}",
-                    $"HTTPS_PROXY={_egressProxy}",
-                    $"https_proxy={_egressProxy}",
-                    $"NO_PROXY={_noProxy}",
-                    $"no_proxy={_noProxy}",
-                    // Informational: lets a cooperating agent (and the proxy tier, which can read
-                    // the matching agenthost.network_allowlist label) see the policy it runs under.
-                    $"AGENTHOST_NETWORK_ALLOWLIST={joined}",
-                };
-                _logger.Information(
-                    "Run {RunId} egress restricted to {AllowlistCount} host(s) via proxy {Proxy} on network {Network}",
-                    runId, policy.NetworkAllowlist.Count, _egressProxy, _allowlistNetwork ?? "bridge");
-                return new NetworkPolicy(_allowlistNetwork ?? "bridge", true, env, policy.NetworkAllowlist);
-            }
-
-            default:
-                return new NetworkPolicy("none", false, Array.Empty<string>(), Array.Empty<string>());
-        }
-    }
-
-    private sealed record NetworkPolicy(
-        string Mode, bool HasNetwork, IReadOnlyList<string> EnvVars, IReadOnlyList<string> Allowlist);
 
     private string SecretsDirectory(string runId) => _paths.LocalSecretsDirectory(runId);
 
