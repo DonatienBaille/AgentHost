@@ -43,9 +43,56 @@ jobs:
         working-directory: backend
         run: dotnet build --no-restore --configuration Release
 
+      # ContainerLifecycleTests launches a real container against the runner's own Docker daemon
+      # (ubuntu-latest has one; no service container is involved). It SKIPS itself where no daemon
+      # answers, so this step exists to make the loss of that coverage loud: if a future runner
+      # image drops Docker, the job fails here instead of quietly going green with the product's
+      # core path untested. Pre-pulling the two base images keeps the test off the registry's
+      # critical path — alpine is the end-to-end agent's base, busybox is what the manifest in
+      # tests/Integration/TestData.cs names.
+      - name: Verify the container runtime and pre-pull agent base images
+        run: |
+          docker version
+          docker pull alpine:3.20
+          docker pull busybox:latest
+
       - name: Test
         working-directory: backend
-        run: dotnet test --no-build --configuration Release --logger "console;verbosity=normal"
+        run: dotnet test --no-build --configuration Release --logger "console;verbosity=normal" --logger "trx;LogFileName=ci.trx"
+
+      # A skipped test reports as success. The end-to-end container test is the only executed proof
+      # that image pull, hardened container creation, secret file delivery, the agent's
+      # AGENTHOST_RUN_TOKEN callback, exit handling and cleanup work at all, so CI asserts that it
+      # really ran rather than trusting the green tick.
+      - name: Assert the container end-to-end test executed (did not skip)
+        working-directory: backend
+        run: |
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+
+          ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          paths = glob.glob("tests/**/TestResults/*.trx", recursive=True)
+          if not paths:
+              sys.exit("no .trx test results were produced")
+
+          executed, not_executed = 0, []
+          for path in paths:
+              for result in ET.parse(path).getroot().findall(".//t:UnitTestResult", ns):
+                  name = result.get("testName") or ""
+                  if "ContainerLifecycleTests" not in name:
+                      continue
+                  if result.get("outcome") == "Passed":
+                      executed += 1
+                  else:
+                      not_executed.append(f'  {name}: {result.get("outcome")}')
+
+          if not executed and not not_executed:
+              sys.exit("ContainerLifecycleTests did not appear in the test results at all")
+          if not_executed:
+              sys.exit("the container end-to-end test did not execute against a real daemon:\n"
+                       + "\n".join(not_executed))
+          print(f"{executed} container end-to-end assertions ran against a real daemon")
+          PY
 
   frontend:
     name: Frontend (build + test)
