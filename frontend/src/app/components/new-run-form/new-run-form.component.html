@@ -24,7 +24,7 @@
     @if (selectedAgent()) {
       <form [formGroup]="form" (ngSubmit)="submit()" class="space-y-4">
         @for (field of fields(); track field.key) {
-          <div>
+          <div data-testid="form-field">
             <label class="block text-sm text-gray-300 mb-1" [for]="field.key">
               {{ field.schema.title || field.key }}
               @if (field.required) {
@@ -56,22 +56,23 @@
             }
 
             @if (field.schema.description) {
-              <p class="text-xs text-gray-500 mt-1">{{ field.schema.description }}</p>
+              <p data-testid="field-description" class="text-xs text-gray-500 mt-1">{{ field.schema.description }}</p>
             }
           </div>
         }
 
         @if (fields().length === 0) {
-          <p class="text-gray-400 text-sm">{{ 'newRun.noInputs' | translate }}</p>
+          <p data-testid="no-inputs" class="text-gray-400 text-sm">{{ 'newRun.noInputs' | translate }}</p>
         }
 
         @if (submitError()) {
-          <div class="bg-red-900/50 border border-red-700 rounded-lg p-3">
+          <div data-testid="submit-error" class="bg-red-900/50 border border-red-700 rounded-lg p-3">
             <p class="text-red-200 text-sm">{{ submitError() }}</p>
           </div>
         }
 
         <button
+          data-testid="submit-run"
           type="submit"
           class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded font-medium transition"
           [disabled]="isSubmitting() || form.invalid"
@@ -80,7 +81,7 @@
         </button>
       </form>
     } @else {
-      <p class="text-gray-400 text-sm">{{ 'newRun.pickAgentFirst' | translate }}</p>
+      <p data-testid="pick-agent-first" class="text-gray-400 text-sm">{{ 'newRun.pickAgentFirst' | translate }}</p>
     }
   </div>
 </div>

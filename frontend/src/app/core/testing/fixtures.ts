@@ -10,10 +10,13 @@
 import {
   Agent,
   AgentVersion,
+  Approval,
   AuditLogEntry,
   Organization,
   Project,
+  ProjectMemory,
   Run,
+  RunEvent,
   RunStatus,
   Secret,
   User,
@@ -156,6 +159,70 @@ export function run(status: RunStatus = 'succeeded', overrides: Partial<Run> = {
     createdAt: T0,
     startedAt: null,
     finishedAt: null,
+    updatedAt: T0,
+    ...overrides,
+  };
+}
+
+/**
+ * `seq` en premier paramètre : c'est l'ordre des évènements que les tests temps réel font varier,
+ * et le hub SignalR les pousse un par un.
+ */
+export function runEvent(seq = 1, overrides: Partial<RunEvent> = {}): RunEvent {
+  return {
+    runId: 'r1',
+    seq,
+    timestamp: T0,
+    eventType: 'log',
+    level: 'info',
+    message: `event ${seq}`,
+    payload: null,
+    ...overrides,
+  };
+}
+
+/**
+ * `requiredRole` en premier paramètre : le masquage du bouton de décision en dépend directement.
+ * `null` signifie « aucun rôle minimal imposé par l'agent ».
+ */
+export function approval(
+  requiredRole: UserRole | null = 'maintainer',
+  overrides: Partial<Approval> = {},
+): Approval {
+  return {
+    id: 'ap1',
+    runId: 'r1',
+    stepId: null,
+    approvalType: 'gate',
+    prompt: 'Déployer en production ?',
+    options: null,
+    requiredRole,
+    requiredCount: 1,
+    responses: [],
+    status: 'pending',
+    expiresAt: '2026-12-31T00:00:00Z',
+    decidedAt: null,
+    decidedBy: null,
+    createdAt: T0,
+    ...overrides,
+  };
+}
+
+export function projectMemory(overrides: Partial<ProjectMemory> = {}): ProjectMemory {
+  return {
+    projectId: 'p1',
+    context: {
+      name: 'Site vitrine',
+      description: 'Vitrine publique',
+      technologies: ['Angular'],
+      recentDecisions: [],
+    },
+    runHistory: [],
+    patterns: [],
+    learnings: [],
+    notes: [],
+    archived: [],
+    createdAt: T0,
     updatedAt: T0,
     ...overrides,
   };
