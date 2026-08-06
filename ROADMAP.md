@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-347 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
+357 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
 contient** concrètement, et **à quoi on reconnaît qu'il est fini**. L'ordre est un défaut
@@ -116,7 +116,7 @@ Effet de bord à traiter dans le même mouvement : la tension actuelle entre `ho
 (qui n'a de sens qu'avec un volume `hostPath`) et un PVC réseau. Avec un tier runner, le workspace
 devient local au runner et le problème disparaît.
 
-### 1.2 Isolation d'exécution renforcée
+### 1.2 Isolation d'exécution renforcée ✅ pour ce qui est faisable ici
 
 Le socket du démon reste équivalent à root sur le nœud. Le proxy filtrant atténue, mais
 « créer + démarrer un conteneur » suffit à atteindre l'hôte. Pour une plateforme dont le métier est
@@ -126,13 +126,32 @@ sysbox.
 Dans le même lot : réseau `--internal` pour que `permissions.network: allowlist` devienne
 **contraignant** et non plus indicatif (aujourd'hui un socket TCP brut ignore `HTTP_PROXY`).
 
-### 1.3 Confronter au réel ce qui n'a jamais été exécuté
+**Livré.** `Docker:Runtime` expose `HostConfig.Runtime` (`runsc`, `kata-runtime`, `sysbox-runc`),
+vide par défaut puisque le runtime doit être installé côté démon. Et l'allowlist ne retombe plus
+sur un bridge ordinaire : sans réseau `--internal`, c'est désormais un échec fermé — le conteneur
+n'a pas de réseau du tout — avec `Docker:AllowUnconfinedAllowlist` comme sortie de secours
+explicite et journalisée à chaque run. La décision est sortie de l'orchestrateur
+(`Services/NetworkPolicyResolver.cs`) parce que c'est de la politique de sécurité et que tous ses
+cas intéressants sont des refus ; 10 tests la couvrent.
 
-Trois surfaces ont été écrites et raisonnées, jamais observées contre le vrai service :
-**Podman** (acceptation de `no-new-privileges=true`, `CapDrop: ["ALL"]`, traduction de `NanoCPUs`
-en limites cgroup, suffixes de montage `:z`/`:U`), **l'E/S S3** (toute la couche réseau de
-`S3ArtifactStorage`), et **l'API HIBP** (format de réponse réel, en-tête de padding, limites de
-débit). Une session de validation contre de vraies instances, une fois, suffit à lever le doute.
+**Non livré, et ce n'est pas un oubli** : gVisor, Kata et sysbox ne sont installés dans aucun
+environnement accessible ici, donc `Docker:Runtime` n'a jamais été exercé contre un vrai runtime
+isolé — voir §1.3.
+
+### 1.3 Confronter au réel ce qui n'a jamais été exécuté — **bloqué ici**
+
+Cinq surfaces ont été écrites et raisonnées, jamais observées contre le vrai service : **Podman**,
+**l'E/S S3**, **l'API HIBP**, **l'envoi SMTP** et le **runtime isolé**. Elles compilent, leurs
+tests passent, et leur comportement en production reste une hypothèse.
+
+**Aucune n'est vérifiable dans l'environnement de développement utilisé jusqu'ici** — constaté, pas
+supposé : le client Docker est présent mais aucun démon ne tourne (`/var/run/docker.sock` n'existe
+pas), Podman n'est pas installé, aucun runtime isolé non plus, MinIO est impossible sans démon, et
+`api.pwnedpasswords.com` est refusé par la politique réseau (403 sur le CONNECT du proxy). Ce volet
+demande une machine autrement équipée ; il n'y a pas de contournement honnête.
+
+Le détail de chaque surface, ce qui est en jeu et **comment la valider concrètement**, est dans
+[docs/validation-reelle.md](docs/validation-reelle.md).
 
 **Fini quand.** Plus d'un réplica backend sert du trafic sans casser le contrôle des runs ; un
 déploiement ne coupe plus le service ; l'allowlist réseau résiste à une tentative de contournement ;
