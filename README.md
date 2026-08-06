@@ -211,6 +211,62 @@ environnement, et un test contre un faux endpoint HTTP vérifierait le comportem
 nôtre. Sont couverts par des tests : l'implémentation locale de bout en bout, la dérivation des clés
 (locale et S3) et la validation de configuration S3.
 
+## Courriel sortant : aucun envoi, ou SMTP
+
+`Email:Provider` sélectionne l'implémentation d'`IEmailSender` :
+
+| Valeur | Comportement |
+| --- | --- |
+| `none` (défaut) | `NoOpEmailSender` : n'envoie **rien** et journalise en Warning le message qui n'est pas parti et pourquoi. C'est le comportement historique du dépôt, rendu explicite. |
+| `smtp` | `SmtpEmailSender` : SMTP réel via `System.Net.Mail.SmtpClient` — hôte, port, STARTTLS, authentification facultative, expéditeur, délai d'expiration. |
+
+```jsonc
+"Email": {
+  "Provider": "smtp",
+  "FromAddress": "no-reply@exemple.org",
+  "AppBaseUrl": "https://agenthost.exemple.org",  // racine publique du front : c'est elle qui rend les liens utilisables
+  "Language": "fr",                                // ou "en"
+  "Smtp": {
+    "Host": "smtp.exemple.org",
+    "Port": "587",
+    "Security": "starttls",                        // ou "none" ; tout le reste vaut starttls
+    "UserName": "", "Password": "",                // vides = pas d'authentification
+    "TimeoutSeconds": "15"
+  }
+}
+```
+
+Une configuration `smtp` incomplète (hôte vide, `FromAddress` absente ou invalide) **retombe sur le
+no-op** avec une raison lisible, au lieu d'empêcher le démarrage : un mailer mal réglé ne doit pas
+transformer une fonctionnalité annexe en dépendance du service entier. À l'inverse, rien ne s'active
+par accident — il faut avoir écrit `smtp` explicitement.
+
+Deux flux sont concernés :
+
+- **Réinitialisation de mot de passe.** Le lien part vers l'adresse qui l'a demandée. Sans mailer, le
+  flux reste inerte comme avant (le jeton brut est abandonné), sauf en développement avec
+  `Auth:ReturnResetTokenInResponse`.
+- **Invitations.** Le lien part vers l'invité·e. Le jeton brut n'est plus rendu à celui qui invite
+  **dès qu'un mailer est configuré** ; sans mailer, il l'est toujours, puisque c'est alors le seul
+  canal de remise existant.
+
+**L'envoi n'est jamais sur le chemin de réponse HTTP** : les appelants mettent le message dans une
+file en mémoire (`IEmailDispatcher`) vidée par une tâche de fond. C'est une propriété de sécurité et
+non une optimisation — `POST /api/auth/password-reset/request` répond 202 que le compte existe ou
+non, et attendre un aller-retour SMTP rendrait la réponse mesurablement plus lente, et faillible,
+uniquement dans la branche « le compte existe ». Le raisonnement complet est dans
+`docs/auth.md` §4 et en commentaire dans `Services/Email/EmailDispatcher.cs`.
+
+**Non testé ici** : l'envoi vers un vrai serveur SMTP. Aucun relais n'est joignable dans cet
+environnement, et un test contre un faux serveur vérifierait le comportement du BCL, pas le nôtre.
+Sont couverts par des tests : le no-op, la sélection du fournisseur, la file d'envoi (y compris avec
+un expéditeur qui lève à chaque message), la construction des liens et des messages, et les deux
+flux de bout en bout contre un expéditeur qui capture en mémoire.
+
+**Limite connue** : le TLS implicite du port 465 (SMTPS) n'est pas géré — `System.Net.Mail.SmtpClient`
+ne sait faire que du TLS explicite (STARTTLS). Tous les relais courants exposent 587/STARTTLS ; un
+déploiement qui n'a que du 465 doit passer par un relais local, ou justifier l'ajout de MailKit.
+
 ## Développement backend
 
 ```bash

@@ -136,26 +136,61 @@ dependency of it.
 
 ---
 
-## 4. What is not production-ready
+## 4. Email delivery, and what is still not production-ready
 
-Two honest caveats. Both come down to the same missing piece: **this system has no mailer.**
+Both token-based flows deliver their link by email, through `IEmailSender` (`Services/Email/`).
+Two implementations, chosen by `Email:Provider`:
 
-### 4.1 Invitations are delivered by hand
+| `Email:Provider` | Implementation | Behaviour |
+|---|---|---|
+| `none` *(default)* | `NoOpEmailSender` | Delivers nothing. Logs a **Warning** naming the message that did *not* go out and why. This is the repository's historical behaviour, made explicit. |
+| `smtp` | `SmtpEmailSender` | Real SMTP over `System.Net.Mail.SmtpClient`: host, port, STARTTLS, optional authentication, sender address, timeout. Implicit TLS (port 465) is **not** supported — see the class comment. |
 
-`POST /api/invitations` returns the raw token in its response and sends nothing to anybody. The
-inviter has to pass it to the invitee over some channel they trust. The endpoint's documentation says
-so plainly rather than implying an email went out. This is workable but manual, and the token's
-security now depends on whatever channel the humans pick.
+An incomplete SMTP configuration (no host, missing or malformed `Email:FromAddress`, unknown
+provider) falls back to the no-op sender with a stated reason rather than refusing to start.
 
-### 4.2 Password reset is a placeholder in production
+**Sending is never on the response path.** Callers hand messages to `IEmailDispatcher`, which writes
+to an in-memory queue and returns immediately; a background service drains it. That is a security
+property, not an optimisation — see §4.2. The queue is not persistent: an abrupt shutdown loses
+messages that have not gone out yet, which is acceptable for mail a user can simply request again,
+and is the extension point where a database-backed outbox would go.
 
-`POST /api/auth/password-reset/request` mints and stores a token, and then, in any default or
-production configuration, **discards the raw value** — nothing reaches the user. The reset flow is
-therefore inert until a mailer exists. That is a known, deliberate gap, not a bug to be worked
-around.
+Relevant keys, all documented inline in `appsettings.json`: `Email:Provider`, `Email:FromAddress`,
+`Email:FromName`, `Email:AppBaseUrl` (the public front-end root the links point at),
+`Email:ResetPasswordPath`, `Email:AcceptInvitationPath`, `Email:Language` (`fr` default, or `en`),
+and `Email:Smtp:{Host,Port,Security,UserName,Password,TimeoutSeconds}`.
 
-`Auth:ReturnResetTokenInResponse` (default `false`) makes the endpoint return the raw token to the
-caller instead. That exists so development and integration tests can drive the flow end to end.
+### 4.1 Invitations
+
+`POST /api/invitations` emails the invitation link to the invitee. **The raw token comes back in the
+response only when no mailer is configured** — that is then the only delivery channel there is, and
+removing it would break the one invitation path that works out of the box; the inviter passes it on
+over a channel they trust, and the token's security depends on whichever channel the humans pick.
+
+With a mailer configured the response carries no token at all. The token is a bearer credential that
+creates an account bound to the invitee's address; once it goes straight to that address, echoing a
+second copy back to the inviter only widens its exposure (browser, client logs, intermediaries) and
+would let the inviter accept the invitation in the invitee's name. A message that does not arrive is
+recovered by revoking the invitation and issuing a new one — the same recovery a lost token has
+always needed, since only the SHA-256 hash is stored.
+
+### 4.2 Password reset
+
+`POST /api/auth/password-reset/request` mints and stores a token and **queues its link for delivery
+to the address that asked**. With `Email:Provider` = `none` nothing is delivered and the flow stays
+inert, exactly as before; with a mailer it is a working production reset flow.
+
+The send is *queued, never awaited*, and that is deliberate. The endpoint answers 202 identically
+whether or not the address has an account, and an awaited SMTP round trip would undo that: it is
+slow, and fallible, precisely and only in the branch where the account exists. An observer who times
+the response, or who watches for a request that fails, would read the answer straight off — the same
+enumeration oracle the flat 202 exists to close, restored through the back door. Enqueuing is a
+non-blocking in-memory write whose cost is orders of magnitude below the Postgres round trips that
+branch already performs, so it introduces no new observable difference. `Integration/EmailDeliveryTests.cs`
+pins this, including with a sender that fails every single send.
+
+`Auth:ReturnResetTokenInResponse` (default `false`) additionally returns the raw token to the caller.
+It exists so development and integration tests can drive the flow end to end without a mail relay.
 **Never enable it in production**: the endpoint is anonymous, so anyone who can name an email address
 could take over that account. The service logs a warning at startup when it is on.
 

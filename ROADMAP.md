@@ -239,8 +239,15 @@ ce mois-ci, lesquels échouent, et vais-je dépasser mon budget ? »
 
 Petits éléments à traiter au fil de l'eau, chacun documenté à son emplacement dans le code :
 
-- Le flux de réinitialisation de mot de passe reste **inerte en production** tant qu'un mailer
-  n'est pas branché (en cours).
+- La file d'envoi de courriels est **en mémoire et non persistante** : un arrêt brutal du processus
+  perd les messages pas encore acheminés. Acceptable pour un courriel transactionnel qu'on peut
+  redemander, mais une table d'attente (« outbox ») serait le vrai correctif — le point d'extension
+  est `Services/Email/EmailDispatcher.cs`, sans changement pour les appelants.
+- Le TLS implicite du port 465 n'est pas géré par `SmtpEmailSender` (limite de
+  `System.Net.Mail.SmtpClient`) ; un déploiement qui n'a que du 465 doit passer par un relais local
+  ou justifier l'ajout de MailKit.
+- Les liens des courriels pointent vers `/reset-password` et `/accept-invitation`, **écrans que le
+  front n'implémente pas encore** : le backend est prêt, l'IHM correspondante reste à faire.
 - `audit_log` n'est pas append-only malgré l'exigence WORM de la spec (en cours).
 - Pas de rotation de la clé de chiffrement des secrets : une fuite impose un rechiffrement manuel
   (en cours).
