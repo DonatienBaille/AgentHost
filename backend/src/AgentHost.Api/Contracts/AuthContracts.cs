@@ -63,8 +63,9 @@ public class PasswordResetRequestResponse
 
     /// <summary>
     /// The raw reset token — ONLY ever populated when <c>Auth:ReturnResetTokenInResponse</c> is
-    /// explicitly enabled, which is a development/test affordance for a deployment with no mailer.
-    /// It is null in every default and production configuration; see the endpoint's doc comment.
+    /// explicitly enabled, which is a development/test affordance for driving the flow without a
+    /// mail relay. In production the token reaches the user by email and never through this field:
+    /// it is null in every default and production configuration; see the endpoint's doc comment.
     /// </summary>
     public string? Token { get; set; }
 }

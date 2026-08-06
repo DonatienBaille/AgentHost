@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-310 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
+347 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
 contient** concrètement, et **à quoi on reconnaît qu'il est fini**. L'ordre est un défaut
@@ -250,11 +250,26 @@ Traité :
   les comptes à second facteur. Idempotent, et ne détruit jamais une valeur qu'il ne sait pas lire.
 - ✅ **Sauvegarde et restauration** : `scripts/backup.sh`, `scripts/restore.sh` et
   [docs/operations.md](docs/operations.md). Les deux scripts ont été exécutés contre une vraie base.
+- ✅ **Mailer** : `IEmailSender` avec no-op par défaut et SMTP optionnel, câblé sur la
+  réinitialisation de mot de passe et les invitations. L'envoi est hors du chemin de réponse pour ne
+  pas rouvrir l'oracle d'énumération que le 202 plat referme.
 
 Reste à traiter :
 
-- Le flux de réinitialisation de mot de passe reste **inerte en production** tant qu'un mailer n'est
-  pas branché (en cours).
+- La file d'envoi de courriels est **en mémoire et non persistante** : un arrêt brutal du processus
+  perd les messages pas encore acheminés. Acceptable pour un courriel transactionnel qu'on peut
+  redemander, mais une table d'attente (« outbox ») serait le vrai correctif — le point d'extension
+  est `Services/Email/EmailDispatcher.cs`, sans changement pour les appelants.
+- Le TLS implicite du port 465 n'est pas géré par `SmtpEmailSender` (limite de
+  `System.Net.Mail.SmtpClient`) ; un déploiement qui n'a que du 465 doit passer par un relais local
+  ou justifier l'ajout de MailKit.
+- **`SmtpEmailSender` n'a jamais parlé à un vrai serveur SMTP** : aucun relais n'est joignable dans
+  l'environnement de développement. Sa sélection par configuration et sa construction sont testées ;
+  la poignée de main STARTTLS, l'authentification et le délai d'expiration reposent sur le contrat
+  documenté du BCL, pas sur une observation. À confronter au réel une fois, comme Podman, S3 et HIBP
+  (lot 1.3).
+- Les liens des courriels pointent vers `/reset-password` et `/accept-invitation`, **écrans que le
+  front n'implémente pas encore** : le backend est prêt, l'IHM correspondante reste à faire.
 - Aucun test de charge : le comportement sous concurrence est inconnu.
 - Pas de suppression en cascade au-delà du soft-delete organisation/projet (purge RGPD réelle).
 - Pas de réplication ni de restauration à un instant précis (PITR) — voir §6 de

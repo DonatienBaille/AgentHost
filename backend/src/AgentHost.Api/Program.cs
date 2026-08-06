@@ -7,6 +7,7 @@ using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Infrastructure.Storage;
 using AgentHost.Api.Repositories;
 using AgentHost.Api.Services;
+using AgentHost.Api.Services.Email;
 using Docker.DotNet;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -150,6 +151,20 @@ builder.Services.AddHttpClient(BreachedPasswordChecker.HttpClientName, client =>
     client.DefaultRequestHeaders.UserAgent.ParseAdd("AgentHost-Backend");
 });
 builder.Services.AddSingleton<IBreachedPasswordChecker, BreachedPasswordChecker>();
+
+// ---- Courriel sortant ----
+// Aucun envoi tant que Email:Provider n'a pas été mis à « smtp » : le défaut est NoOpEmailSender,
+// qui journalise en Warning ce qui ne part pas. Les appelants ne parlent jamais à l'expéditeur
+// directement mais à IEmailDispatcher, qui met en file et rend la main immédiatement — ce qui
+// garde l'acheminement (sa latence comme ses échecs) hors du chemin de réponse HTTP, propriété
+// dont dépend l'absence d'oracle d'énumération sur POST /api/auth/password-reset/request.
+// Voir Services/Email/EmailDispatcher.cs.
+var emailOptions = EmailOptions.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(emailOptions);
+builder.Services.AddSingleton(sp => EmailSenderFactory.Create(emailOptions, sp.GetRequiredService<ILogger>()));
+builder.Services.AddSingleton<BackgroundEmailDispatcher>();
+builder.Services.AddSingleton<IEmailDispatcher>(sp => sp.GetRequiredService<BackgroundEmailDispatcher>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<BackgroundEmailDispatcher>());
 
 // ---- Validation ----
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();

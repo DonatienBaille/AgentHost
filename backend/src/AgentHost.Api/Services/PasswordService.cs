@@ -2,6 +2,7 @@ using AgentHost.Api.Contracts;
 using AgentHost.Api.Domain;
 using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Repositories;
+using AgentHost.Api.Services.Email;
 using Serilog;
 
 namespace AgentHost.Api.Services;
@@ -17,8 +18,9 @@ public interface IPasswordService
 
     /// <summary>
     /// Mints a reset token when the email belongs to a user, and does nothing when it does not.
-    /// Returns the raw token only when <see cref="ReturnsResetTokenInResponse"/> is on; callers
-    /// must answer 202 identically either way.
+    /// When a mailer is configured the reset link is queued for delivery to that address. Returns
+    /// the raw token only when <see cref="ReturnsResetTokenInResponse"/> is on; callers must answer
+    /// 202 identically either way.
     /// </summary>
     Task<string?> RequestResetAsync(string email, CancellationToken ct = default);
 
@@ -52,9 +54,13 @@ public interface IPasswordService
 ///     cosmetic. Access tokens already issued still live out their (15 minute) TTL — the system
 ///     keeps no JWT deny-list, which is documented in <see cref="AuthService"/>.
 ///
-/// <b>Not production-ready:</b> there is no mailer. A real reset flow emails the token to the
-/// address that requested it; here the token is either discarded (production default) or returned
-/// in the response behind an explicit dev-only flag. See <see cref="RequestResetAsync"/>.
+/// <b>Delivery.</b> The reset link is emailed to the address that requested it, through
+/// <see cref="IEmailDispatcher"/> — which queues the message and returns immediately, so neither
+/// the mail relay's latency nor its failures can be observed on the response. A deployment that
+/// configures no mailer (<c>Email:Provider</c> = none, the default) still mints and stores the
+/// token but nothing is delivered, which is the historical behaviour of this repository; the
+/// dev-only <c>Auth:ReturnResetTokenInResponse</c> flag remains the escape hatch for that case.
+/// See <see cref="RequestResetAsync"/>.
 /// </summary>
 public class PasswordService : IPasswordService
 {
@@ -69,6 +75,8 @@ public class PasswordService : IPasswordService
     private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IAuthTokenIssuer _tokenIssuer;
     private readonly IAuditService _auditService;
+    private readonly IEmailDispatcher _emailDispatcher;
+    private readonly EmailOptions _emailOptions;
     private readonly ILogger _logger;
     private readonly bool _returnResetTokenInResponse;
 
@@ -78,6 +86,8 @@ public class PasswordService : IPasswordService
         IRefreshTokenRepository refreshTokenRepository,
         IAuthTokenIssuer tokenIssuer,
         IAuditService auditService,
+        IEmailDispatcher emailDispatcher,
+        EmailOptions emailOptions,
         IConfiguration config,
         ILogger logger)
     {
@@ -86,6 +96,8 @@ public class PasswordService : IPasswordService
         _refreshTokenRepository = refreshTokenRepository;
         _tokenIssuer = tokenIssuer;
         _auditService = auditService;
+        _emailDispatcher = emailDispatcher;
+        _emailOptions = emailOptions;
         _logger = logger;
 
         // Absent or unparseable => OFF. Handing a reset token to an anonymous caller is a full
@@ -105,16 +117,24 @@ public class PasswordService : IPasswordService
     public bool ReturnsResetTokenInResponse => _returnResetTokenInResponse;
 
     /// <summary>
-    /// <b>No mailer caveat.</b> Nothing is sent anywhere. When the email belongs to a user a token
-    /// is minted and stored (hashed), and then:
-    /// <list type="bullet">
-    /// <item>with <c>Auth:ReturnResetTokenInResponse</c> off (the default, and the only correct
-    /// production setting) the raw token is dropped on the floor — so the reset flow is
-    /// effectively inert until a mailer is added. That is a known, deliberate gap;</item>
-    /// <item>with the flag on, the raw token is returned to the caller so development and tests can
-    /// exercise the flow end to end. Enabling it in production would let anyone reset any account
-    /// they can name the email address of.</item>
-    /// </list>
+    /// When the email belongs to a user a token is minted, stored (hashed) and its link queued for
+    /// delivery to that address; when it does not, nothing happens at all. Either way the caller
+    /// must answer identically.
+    ///
+    /// <b>Why the send is queued rather than awaited.</b> This is the endpoint's
+    /// no-account-enumeration property, and it is fragile: awaiting an SMTP round trip would make
+    /// the response measurably slower — and its failure modes visible — exactly and only when the
+    /// account exists, which is the same oracle the flat 202 exists to close. Enqueuing is a
+    /// non-blocking in-memory write whose cost is orders of magnitude below the Postgres round
+    /// trips this branch already performs, so it adds no new observable difference between the two
+    /// branches. See <see cref="BackgroundEmailDispatcher"/>.
+    ///
+    /// <b>What comes back.</b> With <c>Auth:ReturnResetTokenInResponse</c> off (the default, and
+    /// the only correct production setting) the raw token is never returned; the emailed link is
+    /// then the only way to obtain it, which is what makes the flow usable in production. With the
+    /// flag on, the raw token is also returned to the caller so development and tests can exercise
+    /// the flow end to end without a mailer — in production that would let anyone reset any account
+    /// whose email address they can name.
     /// </summary>
     public async Task<string?> RequestResetAsync(string email, CancellationToken ct = default)
     {
@@ -144,6 +164,15 @@ public class PasswordService : IPasswordService
         }, ct);
 
         await _auditService.RecordAsync(user.OrgId, "password_reset.requested", user.Id, "user", user.Id, ct: ct);
+
+        // Fire-and-forget by construction: Enqueue never blocks and never throws, so nothing about
+        // the mail relay can reach this request — see the summary above. With no mailer configured
+        // this lands in NoOpEmailSender, which logs that the message did not go out.
+        _emailDispatcher.Enqueue(EmailTemplates.PasswordReset(
+            user.Email,
+            _emailOptions.PasswordResetLink(rawToken),
+            ResetTokenLifetime,
+            _emailOptions.Language));
 
         return _returnResetTokenInResponse ? rawToken : null;
     }

@@ -152,7 +152,7 @@ public class PasswordPolicyTests
 
         var accept = await anonymous.PostJsonAsync("/api/invitations/accept", new AcceptInvitationRequest
         {
-            Token = invite!.Token,
+            Token = invite!.Token!,
             Password = password,
         });
         Assert.Equal(HttpStatusCode.BadRequest, accept.StatusCode);

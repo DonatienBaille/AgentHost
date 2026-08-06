@@ -2,6 +2,7 @@ using AgentHost.Api.Contracts;
 using AgentHost.Api.Domain;
 using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Repositories;
+using AgentHost.Api.Services.Email;
 using Serilog;
 
 namespace AgentHost.Api.Services;
@@ -9,8 +10,9 @@ namespace AgentHost.Api.Services;
 public interface IInvitationService
 {
     /// <summary>
-    /// Creates an invitation into <paramref name="orgId"/> and returns it together with the raw
-    /// token — the only time that value is ever produced.
+    /// Creates an invitation into <paramref name="orgId"/> and queues the invitation email. The
+    /// raw token comes back in the response only when no mailer is configured — see
+    /// <see cref="InvitationService.CreateAsync"/> for why.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// The email already belongs to a user, or already has an outstanding invitation.
@@ -56,6 +58,8 @@ public class InvitationService : IInvitationService
     private readonly IUserRepository _userRepository;
     private readonly IAuthTokenIssuer _tokenIssuer;
     private readonly IAuditService _auditService;
+    private readonly IEmailDispatcher _emailDispatcher;
+    private readonly EmailOptions _emailOptions;
     private readonly ILogger _logger;
 
     public InvitationService(
@@ -63,15 +67,38 @@ public class InvitationService : IInvitationService
         IUserRepository userRepository,
         IAuthTokenIssuer tokenIssuer,
         IAuditService auditService,
+        IEmailDispatcher emailDispatcher,
+        EmailOptions emailOptions,
         ILogger logger)
     {
         _invitationRepository = invitationRepository;
         _userRepository = userRepository;
         _tokenIssuer = tokenIssuer;
         _auditService = auditService;
+        _emailDispatcher = emailDispatcher;
+        _emailOptions = emailOptions;
         _logger = logger;
     }
 
+    /// <summary>
+    /// Mints the invitation, queues its email, and decides who gets to see the raw token.
+    ///
+    /// <b>Without a mailer</b> (<c>Email:Provider</c> = none, the default) the token is returned to
+    /// the inviter, exactly as before this batch: it is then the only delivery channel there is,
+    /// and removing it would break the one invitation path that works today.
+    ///
+    /// <b>With a mailer</b> it is not returned. The token is a bearer credential that creates an
+    /// account bound to the invitee's address; once it reaches that address directly, echoing a
+    /// second copy back to the inviter only widens exposure — it survives in the browser, in
+    /// whatever the client logs, in intermediaries — and it lets the inviter accept the invitation
+    /// in the invitee's name. Neither is needed for the flow to work, so neither is offered. A
+    /// message that does not arrive is recovered by revoking the invitation and issuing a new one,
+    /// which is also what a lost token has always required.
+    ///
+    /// The email is queued rather than awaited, like every other send in the system: a mail relay
+    /// must not be able to make POST /api/invitations slow or make it fail after the invitation is
+    /// already committed to the database.
+    /// </summary>
     public async Task<CreateInvitationResponse> CreateAsync(
         CreateInvitationRequest req, string orgId, string invitedByUserId, CancellationToken ct = default)
     {
@@ -100,10 +127,26 @@ public class InvitationService : IInvitationService
         await _invitationRepository.InsertAsync(invitation, ct);
         await _auditService.RecordAsync(orgId, "invitation.created", invitedByUserId, "invitation", invitation.Id, ct: ct);
 
+        _emailDispatcher.Enqueue(EmailTemplates.Invitation(
+            email,
+            _emailOptions.InvitationLink(rawToken),
+            InvitationLifetime,
+            _emailOptions.Language));
+
+        var delivered = _emailDispatcher.IsConfigured;
+        if (!delivered)
+        {
+            _logger.Information(
+                "Invitation {InvitationId} créée sans mailer : le jeton brut est rendu à l'appelant, " +
+                "qui doit le transmettre lui-même",
+                invitation.Id);
+        }
+
         return new CreateInvitationResponse
         {
             Invitation = InvitationResponse.From(invitation, now),
-            Token = rawToken,
+            // Voir le commentaire de la méthode : rendu seulement quand aucun autre canal n'existe.
+            Token = delivered ? null : rawToken,
         };
     }
 
