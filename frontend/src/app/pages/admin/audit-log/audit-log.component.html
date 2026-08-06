@@ -4,7 +4,7 @@
   <h1 class="text-3xl font-bold mb-8">{{ 'adminAudit.title' | translate }}</h1>
 
   @if (error()) {
-    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+    <div data-testid="audit-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
       <p class="text-red-200">{{ error() }}</p>
     </div>
   }
@@ -27,7 +27,7 @@
       </thead>
       <tbody>
         @for (entry of entries(); track entry.id) {
-          <tr class="border-b border-gray-700 last:border-0">
+          <tr data-testid="audit-row" class="border-b border-gray-700 last:border-0">
             <td class="px-4 py-2 font-mono text-xs">{{ entry.action }}</td>
             <td class="px-4 py-2 text-gray-400">{{ entry.actorUserId || '—' }}</td>
             <td class="px-4 py-2 text-gray-400">
@@ -44,7 +44,7 @@
     </table>
 
     @if (!isLoading() && entries().length === 0) {
-      <p class="text-gray-500 text-sm p-4">{{ 'adminAudit.empty' | translate }}</p>
+      <p data-testid="audit-empty" class="text-gray-500 text-sm p-4">{{ 'adminAudit.empty' | translate }}</p>
     }
   </div>
 </div>
