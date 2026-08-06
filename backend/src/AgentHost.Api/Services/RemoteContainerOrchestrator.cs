@@ -87,6 +87,8 @@ public class RemoteContainerOrchestrator : IContainerOrchestrator
     {
         using var runIdProperty = Serilog.Context.LogContext.PushProperty("RunId", run.Id);
 
+        // Adresse composée pour CHOISIR un runner ; elle est remplacée plus bas par celle que le
+        // runner annonce, qui désigne le nœud lui-même.
         var runnerUrl = SelectRunnerForLaunch();
 
         try
@@ -104,6 +106,21 @@ public class RemoteContainerOrchestrator : IContainerOrchestrator
 
             var launched = await response.Content.ReadFromJsonAsync<RunnerLaunchResponse>(Json, ct)
                 ?? throw new InvalidOperationException($"Runner {runnerUrl} returned an empty launch response");
+
+            // Le runner annonce sa propre adresse. C'est elle qu'il faut garder : l'URL composée
+            // ci-dessus est celle du Service du DaemonSet, qui répartit sur les nœuds prêts — la
+            // conserver reviendrait à demander plus tard l'arrêt de ce conteneur à un nœud tiré au
+            // sort. Voir RunnerLaunchResponse.CallbackUrl.
+            if (!string.IsNullOrWhiteSpace(launched.CallbackUrl))
+            {
+                var pinned = launched.CallbackUrl.TrimEnd('/');
+                if (!string.Equals(pinned, runnerUrl, StringComparison.Ordinal))
+                {
+                    run.RunnerUrl = pinned;
+                    await _runRepository.SetRunnerUrlAsync(run.Id, pinned, ct);
+                    runnerUrl = pinned;
+                }
+            }
 
             _logger.Information(
                 "Run {RunId} launched on runner {RunnerUrl} ({RunnerId}) as container {ContainerId}",

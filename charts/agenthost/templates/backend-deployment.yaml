@@ -1,4 +1,14 @@
 {{- $artifactProvider := .Values.artifacts.provider | default "local" -}}
+{{- $runner := .Values.runner.enabled -}}
+{{- /*
+Garde-fou : sans le tier runner, plusieurs répliques backend ne se partagent pas la capacité, elles
+cassent le contrôle des runs — chacune ne voit que les conteneurs de son propre nœud et répond
+« annulé » sans rien avoir arrêté. Échouer au rendu du chart plutôt que de laisser découvrir la
+panne en production, où elle se manifeste par des runs qu'on ne peut plus arrêter.
+*/ -}}
+{{- if and (gt (int .Values.replicaCount) 1) (not $runner) -}}
+  {{- fail "replicaCount > 1 requires runner.enabled: true. Without the runner tier the backend talks to its own node's container daemon, so a second replica cannot stop or read the logs of a run the first one launched." -}}
+{{- end -}}
 {{- $localArtifacts := eq $artifactProvider "local" -}}
 {{- if not (has $artifactProvider (list "local" "s3")) -}}
   {{- fail (printf "artifacts.provider must be 'local' or 's3', got %q" $artifactProvider) -}}
@@ -12,11 +22,23 @@ metadata:
     app.kubernetes.io/component: backend
 spec:
   replicas: {{ .Values.replicaCount }}
-  # The orchestrator is node-bound and its data lives on a ReadWriteOnce volume, so a rolling
-  # update must terminate the old pod before starting the new one — otherwise the new pod cannot
-  # attach the volume and the rollout stalls.
+  {{- if $runner }}
+  # Mise à jour sans coupure : avec le tier runner, une réplique backend ne détient plus rien de
+  # nœud-local. Elle ne monte plus le socket, et les données de run vivent sur les nœuds runner (ou
+  # dans un bucket pour les artefacts), donc plus rien n'oblige à arrêter l'ancien pod avant de
+  # démarrer le nouveau — ce qui était la vraie cause de la coupure à chaque déploiement.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- else }}
+  # Sans tier runner, l'orchestrateur est lié au nœud et ses données vivent sur un volume
+  # ReadWriteOnce : une mise à jour progressive doit terminer l'ancien pod avant de démarrer le
+  # nouveau, sinon celui-ci ne peut pas attacher le volume et le déploiement se bloque.
   strategy:
     type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "agenthost.labels" . | nindent 6 }}
@@ -33,8 +55,9 @@ spec:
         runAsUser: 64198
         runAsGroup: 64198
         fsGroup: 64198
-        {{- if and .Values.docker.mountSocket (gt (int .Values.docker.socketGroupId) 0) }}
+        {{- if and (not $runner) .Values.docker.mountSocket (gt (int .Values.docker.socketGroupId) 0) }}
         # Lets the non-root user reach the node's Docker socket without running as root.
+        # Inutile dès que le tier runner existe : le backend ne touche plus au socket.
         supplementalGroups:
           - {{ .Values.docker.socketGroupId }}
         {{- end }}
@@ -74,10 +97,25 @@ spec:
             - name: Redis__Port
               value: "6379"
             {{- end }}
+            {{- if $runner }}
+            # Orchestration déléguée au DaemonSet runner. Le backend ne parle plus à aucun démon :
+            # c'est ce qui le rend réplicable, et c'est aussi ce qui lui retire l'accès root au nœud.
+            - name: Runner__Mode
+              value: "remote"
+            - name: Runner__BaseUrl
+              value: "http://{{ include "agenthost.fullname" . }}-runner:{{ .Values.runner.port }}"
+            - name: Runner__AuthToken
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agenthost.fullname" . }}-secrets
+                  key: runnerAuthToken
+            {{- else }}
             - name: Docker__Host
               value: {{ .Values.docker.host | default (printf "unix://%s" .Values.docker.socketPath) | quote }}
             - name: Docker__WorkspacePath
               value: /var/agenthost/runs
+            {{- end }}
+            {{- if not $runner }}
             {{- with .Values.docker.hostWorkspacePath }}
             # The node's own path for the same directory: bind sources are resolved by the daemon,
             # not by this pod. See the values.yaml comment before setting it.
@@ -95,6 +133,7 @@ spec:
             {{- with .Values.docker.allowlistNetwork }}
             - name: Docker__AllowlistNetwork
               value: {{ . | quote }}
+            {{- end }}
             {{- end }}
             - name: Artifacts__Provider
               value: {{ $artifactProvider | quote }}
@@ -158,13 +197,15 @@ spec:
               value: "http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}"
             {{- end }}
           volumeMounts:
+            {{- if not $runner }}
             - name: runs
               mountPath: /var/agenthost/runs
+            {{- end }}
             {{- if $localArtifacts }}
             - name: artifacts
               mountPath: /var/agenthost/artifacts
             {{- end }}
-            {{- if .Values.docker.mountSocket }}
+            {{- if and (not $runner) .Values.docker.mountSocket }}
             - name: docker-socket
               mountPath: {{ .Values.docker.socketPath }}
             {{- end }}
@@ -185,8 +226,10 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
       volumes:
-        # Run workspaces and artifacts must outlive the pod: artifacts are served back to users long
-        # after the run that produced them has exited.
+        {{- if not $runner }}
+        # Workspaces des runs : n'existent dans le pod backend que sans tier runner. Avec le tier
+        # runner ils vivent sur les nœuds, et ce volume — ainsi que son PVC ReadWriteOnce, qui est
+        # ce qui empêchait une seconde réplique de se planifier — disparaît du pod backend.
         - name: runs
           {{- if .Values.persistence.runs.enabled }}
           persistentVolumeClaim:
@@ -194,6 +237,7 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- end }}
         {{- if $localArtifacts }}
         - name: artifacts
           {{- if .Values.persistence.artifacts.enabled }}
@@ -203,9 +247,10 @@ spec:
           emptyDir: {}
           {{- end }}
         {{- end }}
-        {{- if .Values.docker.mountSocket }}
-        # The orchestrator launches agents on the node's Docker daemon; with no socket here and no
-        # proxy in docker.host, the backend cannot start a single run.
+        {{- if and (not $runner) .Values.docker.mountSocket }}
+        # Sans tier runner, l'orchestrateur lance les agents sur le démon du nœud ; sans ce socket et
+        # sans proxy dans docker.host, le backend ne peut démarrer aucun run. Avec le tier runner,
+        # ce montage disparaît : le socket n'est plus détenu que par le DaemonSet.
         - name: docker-socket
           hostPath:
             path: {{ .Values.docker.socketPath }}

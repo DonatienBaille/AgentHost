@@ -1,21 +1,27 @@
-# Number of replicas for the backend AND frontend deployments.
+# Nombre de répliques des déploiements backend ET frontend.
 #
-# KEEP THIS AT 1 for the backend as the code stands today. The backend embeds the container
-# orchestrator, which talks to the Docker daemon of the node it runs on: StopAsync/GetLogsAsync look
-# a run's container up on *that* daemon, so a second replica cannot manage, stop, or read logs from
-# runs launched by the first. Run workspaces and artifacts have the same problem — they are
-# node-local files (see persistence below).
+# LE BACKEND EST DÉSORMAIS RÉPLICABLE, à une condition : runner.enabled (ci-dessous), qui sort
+# l'orchestration dans un DaemonSet et fait persister au backend quel runner détient chaque run
+# (colonne runs.runner_url, migration 0009). N'importe quelle réplique peut alors arrêter et lire
+# un run qu'elle n'a pas lancé.
 #
-# Horizontal scaling requires decoupling the orchestrator into a separate runner tier (a DaemonSet
-# or an external job runner) that the API talks to over an API, so any API replica can act on any
-# run. Until that exists, scaling out silently breaks run control instead of adding capacity. The
-# SignalR Redis backplane (enabled automatically when Redis is configured) is in place and is a
-# prerequisite for that work, but it is not sufficient on its own.
+# Les autres prérequis sont en place et doivent le rester : le backplane Redis SignalR (activé dès
+# que Redis est joignable — sans lui un client connecté à la réplique A ne voit pas les événements
+# publiés par la B) et le stockage objet S3 pour les artefacts (artifacts.provider: s3 — sinon
+# chaque réplique ne sert que les artefacts qu'elle a écrits sur son propre volume).
+#
+# AVEC runner.enabled: false, GARDEZ 1. Le backend parle alors au démon de son propre nœud et une
+# seconde réplique ne trouverait pas les conteneurs de la première : elle répondrait « annulé »
+# sans rien avoir arrêté.
+#
+# Défaut à 1 délibérément : la mise à l'échelle est un choix d'exploitation, pas un effet de bord
+# d'une mise à jour de chart.
 replicaCount: 1
 
 image:
   backend: agenthost/backend:latest
   frontend: agenthost/frontend:latest
+  runner: agenthost/runner:latest
   pullPolicy: IfNotPresent
 
 service:
@@ -26,6 +32,34 @@ service:
     # The frontend image runs nginx unprivileged, so inside the container it listens on 8080.
     containerPort: 8080
 
+# Tier d'exécution (lot 1.1) : un DaemonSet qui expose l'orchestration de conteneurs du nœud sur
+# HTTP, et que le backend pilote au lieu de parler lui-même au démon.
+#
+# C'EST CE QUI DÉBLOQUE replicaCount > 1. Sans lui, « où tourne le conteneur de ce run » n'est
+# écrit nulle part : c'est une propriété implicite du pod qui a reçu la requête de création.
+#
+# enabled: false garde le comportement historique (backend en mode inprocess, une seule réplique).
+runner:
+  enabled: false
+  port: 5001
+  # Jeton porteur partagé backend <-> runner. Sans lui le runner refuse de démarrer : un runner
+  # ouvert est un accès root sur le nœud. `openssl rand -base64 32`. Écrit dans le Secret du chart.
+  # (Le réseau reste la défense principale : la NetworkPolicy n'y laisse entrer que le backend.)
+  authToken: ""
+  # Monter le socket du nœud dans le pod runner. C'est le seul pod qui en a besoin ; le backend
+  # cesse de l'avoir dès que runner.enabled est vrai.
+  mountSocket: true
+  # Répertoire des données de run, sur le nœud.
+  workspacePath: /var/agenthost/runs
+  # true : volume hostPath au même chemin absolu. C'est le montage cohérent ici — les données de
+  # run sont locales au nœud qui exécute le conteneur, et le démon doit voir ce répertoire sous ce
+  # chemin exact. C'est aussi ce qui fait DISPARAÎTRE la tension entre docker.hostWorkspacePath et
+  # un PVC réseau : le workspace redevient local au processus qui parle au démon.
+  # false : emptyDir, correct seulement pour un essai — les données de run meurent avec le pod.
+  hostPathWorkspace: true
+  nodeSelector: {}
+  tolerations: []
+
 # Container runtime access for the orchestrator.
 #
 # Docker and Podman both serve the Docker REST API and the orchestrator makes identical calls
@@ -33,8 +67,9 @@ service:
 #   socketPath: /run/podman/podman.sock     (rootful service; see values-podman.yaml)
 #   socketPath: /run/user/<uid>/podman/podman.sock   (rootless — read the Podman section of README)
 docker:
-  # Mount the node's runtime socket into the backend pod. Without it — and without `host` pointing
-  # somewhere else — the backend cannot launch a single agent, because it has no daemon to talk to.
+  # Mount the node's runtime socket into the BACKEND pod. N'a de sens qu'avec runner.enabled: false :
+  # dès que le tier runner existe, c'est lui qui détient le socket et le backend n'en a plus besoin
+  # (le template le retire alors du pod backend, quelle que soit la valeur ici).
   #
   # SECURITY: whoever holds this socket is root on the node. Prefer deploying a filtering socket
   # proxy (as docker-compose.yml does with tecnativa/docker-socket-proxy — it fronts a Podman socket
@@ -77,8 +112,9 @@ docker:
 #                     nothing writes to it.
 #
 # S3 artifacts are the PREREQUISITE for serving artifacts from more than one replica, not the thing
-# that delivers it: with objects in a bucket, any replica can serve any artifact. The orchestrator
-# is still node-bound (see replicaCount), so replicaCount stays 1 regardless.
+# that delivers it: with objects in a bucket, any replica can serve any artifact. Avec
+# runner.enabled et replicaCount > 1, le passage à 's3' n'est plus une bonne pratique mais une
+# obligation : sur disque local, chaque réplique ne sert que les artefacts qu'elle a écrits.
 artifacts:
   provider: local
   s3:
@@ -98,9 +134,10 @@ artifacts:
 # them back when an artifact is downloaded. With no volume they live in the pod's ephemeral
 # filesystem, so artifacts vanish on every restart.
 #
-# accessMode ReadWriteOnce matches replicaCount 1. More than one backend replica would need
-# ReadWriteMany (and the runner-tier work described above); with RWO the second pod simply will not
-# schedule on another node.
+# accessMode ReadWriteOnce matches replicaCount 1. Avec plusieurs répliques backend il faut du
+# ReadWriteMany, ou — bien mieux — runner.enabled: true (les workspaces vivent alors sur les nœuds
+# runner) et artifacts.provider: s3 : la volumétrie du pod backend devient inutile et les deux PVC
+# peuvent être désactivés.
 persistence:
   runs:
     enabled: true
@@ -151,6 +188,15 @@ ingress:
   tls: true
 
 resources:
+  runner:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      # Le runner ne fait que piloter le démon : il ne porte ni la charge des agents (ce sont des
+      # conteneurs frères, comptabilisés sur le nœud) ni celle de l'API métier.
+      cpu: 500m
+      memory: 512Mi
   backend:
     requests:
       cpu: 500m
@@ -166,8 +212,10 @@ resources:
       cpu: 500m
       memory: 256Mi
 
-# Disabled on purpose — see the replicaCount comment. The template is kept so this can be switched
-# on the day the orchestrator runs in its own tier and the API replicas are genuinely stateless.
+# Désactivé par défaut, mais plus bloqué : avec runner.enabled: true les répliques backend sont
+# réellement interchangeables et l'autoscaling devient défendable. Le laisser à false tant que
+# runner.enabled est false — sans le tier runner, ajouter des répliques casse silencieusement le
+# contrôle des runs au lieu d'ajouter de la capacité (le template le refuse d'ailleurs).
 autoscaling:
   backend:
     enabled: false
@@ -178,6 +226,11 @@ autoscaling:
 podDisruptionBudget:
   backend:
     minAvailable: 1
+  runner:
+    # maxUnavailable et non minAvailable : sur un DaemonSet le nombre de pods est le nombre de
+    # nœuds, que le chart ne connaît pas. Un nœud vidé à la fois.
+    enabled: true
+    maxUnavailable: 1
 
 networkPolicy:
   enabled: true

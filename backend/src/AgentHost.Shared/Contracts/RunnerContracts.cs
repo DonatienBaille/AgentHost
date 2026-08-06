@@ -68,6 +68,23 @@ public sealed record RunnerLaunchResponse
     /// qui répond à cette adresse ».
     /// </summary>
     public string? RunnerId { get; init; }
+
+    /// <summary>
+    /// Adresse à laquelle joindre <b>ce pod runner précis</b> par la suite
+    /// (<c>Runner:AdvertisedUrl</c>, en Kubernetes <c>http://$(POD_IP):5001</c>).
+    ///
+    /// <para><b>C'est le champ qui fait fonctionner le routage.</b> Le backend choisit un runner en
+    /// composant le Service du DaemonSet, qui répartit sur les nœuds prêts — il ne sait donc pas,
+    /// au moment d'émettre la requête, quel nœud va la prendre. Persister l'URL du Service dans
+    /// <c>runs.runner_url</c> reviendrait à demander plus tard l'arrêt du conteneur à un nœud tiré
+    /// au sort : exactement la panne que ce lot corrige, réintroduite un étage plus haut. Le runner
+    /// répond donc par sa propre adresse, et c'est elle que le backend enregistre.</para>
+    ///
+    /// <para><c>null</c> quand le runner n'a pas d'adresse propre à annoncer (déploiement à un seul
+    /// runner, docker-compose) : le backend garde alors l'URL qu'il a composée, ce qui est correct
+    /// puisqu'elle ne désigne qu'un seul processus.</para>
+    /// </summary>
+    public string? CallbackUrl { get; init; }
 }
 
 /// <summary>

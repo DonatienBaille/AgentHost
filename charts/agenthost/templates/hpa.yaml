@@ -1,11 +1,16 @@
 {{- /*
-Disabled by default (values.yaml). The backend is not horizontally scalable today: the orchestrator
-talks to the Docker daemon of its own node and run data lives on a ReadWriteOnce volume, so extra
-replicas cannot manage or observe runs started by the first one. This template is kept ready for the
-day the orchestrator moves into its own runner tier; enabling it before then adds replicas that
-silently cannot do the job.
+Désactivé par défaut (values.yaml), mais plus bloqué : depuis le lot 1.1, runner.enabled: true sort
+l'orchestration dans un DaemonSet et fait persister au backend quel runner détient chaque run, si
+bien que les répliques backend sont réellement interchangeables.
+
+Sans le tier runner, en revanche, l'autoscaling ajoute des répliques qui ne peuvent silencieusement
+pas faire le travail : chacune ne voit que les conteneurs de son propre nœud. Le rendu échoue donc
+plutôt que de laisser un HPA fabriquer cette panne tout seul, à l'heure de pointe.
 */ -}}
 {{- if .Values.autoscaling.backend.enabled }}
+{{- if not .Values.runner.enabled }}
+  {{- fail "autoscaling.backend.enabled requires runner.enabled: true — without the runner tier, extra backend replicas cannot manage runs started by another replica." }}
+{{- end }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:

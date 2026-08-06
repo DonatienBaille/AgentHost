@@ -18,8 +18,18 @@ public static class RunnerEndpoints
     /// <summary>Délai maximal d'une attente longue, borné pour ne pas dépasser les délais d'inactivité des ingress.</summary>
     private const int MaxWaitSeconds = 120;
 
-    public static IEndpointRouteBuilder MapRunnerEndpoints(this IEndpointRouteBuilder app, string authToken)
+    /// <summary>
+    /// Adresse propre de ce pod runner (<c>Runner:AdvertisedUrl</c>), renvoyée à chaque lancement.
+    /// Voir <see cref="RunnerLaunchResponse.CallbackUrl"/> : c'est elle que le backend persiste, et
+    /// non l'adresse du Service par laquelle il est arrivé.
+    /// </summary>
+    private static string? _advertisedUrl;
+
+    public static IEndpointRouteBuilder MapRunnerEndpoints(
+        this IEndpointRouteBuilder app, string authToken, string? advertisedUrl = null)
     {
+        _advertisedUrl = string.IsNullOrWhiteSpace(advertisedUrl) ? null : advertisedUrl.Trim().TrimEnd('/');
+
         var runner = app.MapGroup("/runner").RequireRunnerToken(authToken);
 
         runner.MapPost("/runs", Launch).WithName("RunnerLaunch");
@@ -45,6 +55,7 @@ public static class RunnerEndpoints
             {
                 ContainerId = containerId,
                 RunnerId = RunSupervisor.RunnerId,
+                CallbackUrl = _advertisedUrl,
             });
         }
         catch (Exception ex)

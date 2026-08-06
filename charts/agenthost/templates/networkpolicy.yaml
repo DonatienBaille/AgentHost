@@ -20,5 +20,35 @@ spec:
       ports:
         - port: {{ .Values.service.backend.port }}
   egress:
-    - {} # backend needs egress to postgres, redis, docker daemon, and agent image registries
+    - {} # backend needs egress to postgres, redis, the runner tier, and agent image registries
+{{- if .Values.runner.enabled }}
+---
+{{- /*
+Le runner lance des conteneurs sur le nœud : l'atteindre, c'est disposer de tout ce que le socket
+du démon permet. Le jeton porteur est la seconde barrière ; celle-ci est la première, et c'est
+elle qui doit tenir. UN SEUL appelant est autorisé en entrée : le backend.
+
+Aucune règle d'egress : le runner doit joindre le socket du nœud (hors réseau de pods) et les
+registres d'images, et restreindre cela demanderait de connaître les registres du déploiement.
+*/ -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agenthost.fullname" . }}-runner
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agenthost.labels" . | nindent 6 }}
+      app.kubernetes.io/component: runner
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "agenthost.labels" . | nindent 14 }}
+              app.kubernetes.io/component: backend
+      ports:
+        - port: {{ .Values.runner.port }}
+{{- end }}
 {{- end }}

@@ -63,7 +63,17 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
-app.MapRunnerEndpoints(authToken);
+// Adresse propre de ce pod, annoncée au backend à chaque lancement pour qu'il enregistre le NŒUD
+// qui détient le run et non le Service par lequel il est passé. En Kubernetes :
+// Runner__AdvertisedUrl: http://$(POD_IP):5001, POD_IP venant de l'API descendante.
+var advertisedUrl = builder.Configuration["Runner:AdvertisedUrl"];
+if (!string.IsNullOrWhiteSpace(advertisedUrl))
+    Log.Information("Runner advertises itself to the backend as {AdvertisedUrl}", advertisedUrl);
+else
+    Log.Information("Runner has no Runner:AdvertisedUrl; the backend will keep the address it dialled. " +
+                    "Correct only when a single runner answers that address.");
+
+app.MapRunnerEndpoints(authToken, advertisedUrl);
 
 // /health       — le processus répond. Aucune dépendance consultée, donc un démon momentanément
 //                 indisponible ne fait pas redémarrer un pod runner qui tient encore des conteneurs
