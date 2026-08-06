@@ -123,7 +123,7 @@ export class NewRunFormComponent implements OnInit {
 
       await this.router.navigate(['/runs', run.id]);
     } catch (err) {
-      this.submitError.set('Failed to create run');
+      this.submitError.set('errors.createRun');
     } finally {
       this.isSubmitting.set(false);
     }

@@ -56,7 +56,7 @@ describe('ProjectService', () => {
       httpMock.expectOne(URL).flush(null, { status: 500, statusText: 'Server Error' });
       await pending;
 
-      expect(service.error()).toBe('Failed to load projects');
+      expect(service.error()).toBe('errors.loadProjects');
       expect(service.isLoading()).toBe(false);
     });
 
@@ -139,7 +139,7 @@ describe('ProjectService', () => {
       httpMock.expectOne(`${URL}/p9`).flush(null, { status: 404, statusText: 'Not Found' });
       await pending;
 
-      expect(service.error()).toBe('Failed to load project p9');
+      expect(service.error()).toBe('errors.loadProject');
       expect(service.isLoading()).toBe(false);
     });
   });

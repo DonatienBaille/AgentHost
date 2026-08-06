@@ -3,6 +3,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { TranslatePipe } from '@ngx-translate/core';
 import { WebhookService } from '../../../services/webhook.service';
+import { AuthService } from '../../../services/auth.service';
 import { WEBHOOK_EVENTS, Webhook, WebhookEvent } from '../../../core/models';
 
 @Component({
@@ -16,11 +17,20 @@ import { WEBHOOK_EVENTS, Webhook, WebhookEvent } from '../../../core/models';
 export class WebhooksComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly webhookService = inject(WebhookService);
+  private readonly authService = inject(AuthService);
   private readonly route = inject(ActivatedRoute);
 
   readonly webhooks = this.webhookService.webhooks;
   readonly isLoading = this.webhookService.isLoading;
   readonly error = this.webhookService.error;
+
+  /**
+   * Le serveur exige `maintainer` sur POST/PUT/DELETE /api/webhooks
+   * (backend Endpoints/WebhookEndpoints.cs). Sans cette barrière, un `viewer` se voyait offrir
+   * la création, l'activation et la suppression — rediriger les événements d'un projet vers une
+   * URL arbitraire — pour ne récolter qu'un 403 après avoir rempli le formulaire.
+   */
+  readonly canManage = this.authService.isMaintainerOrAbove;
 
   readonly events: readonly WebhookEvent[] = WEBHOOK_EVENTS;
   readonly showForm = signal(false);
@@ -60,6 +70,8 @@ export class WebhooksComponent implements OnInit {
   }
 
   async submit(): Promise<void> {
+    // Revérifié hors du gabarit : masquer un bouton n'empêche pas d'appeler la méthode.
+    if (!this.canManage()) return;
     const projectId = this.projectId();
     const events = this.selectedEvents();
     if (!projectId || !this.form.value.url || events.length === 0) {
@@ -87,6 +99,8 @@ export class WebhooksComponent implements OnInit {
   }
 
   async toggleActive(webhook: Webhook): Promise<void> {
+    // Revérifié hors du gabarit : masquer un bouton n'empêche pas d'appeler la méthode.
+    if (!this.canManage()) return;
     this.busyId.set(webhook.id);
     try {
       await this.webhookService.toggleActive(webhook);
@@ -98,6 +112,8 @@ export class WebhooksComponent implements OnInit {
   }
 
   async remove(id: string): Promise<void> {
+    // Revérifié hors du gabarit : masquer un bouton n'empêche pas d'appeler la méthode.
+    if (!this.canManage()) return;
     this.busyId.set(id);
     try {
       await this.webhookService.deleteWebhook(id);

@@ -108,32 +108,51 @@ describe('DashboardComponent', () => {
   describe('error state', () => {
     it('renders the run service error signal', () => {
       setup();
-      runService.error.set('Failed to load runs');
+      runService.error.set('errors.loadRuns');
       fixture.detectChanges();
 
       const banner = el('dashboard-error');
       expect(banner).not.toBeNull();
-      expect(banner!.textContent).toContain('Failed to load runs');
+      expect(banner!.textContent).toContain('errors.loadRuns');
     });
 
     it('keeps rendering the tiles alongside the error banner', () => {
       setup();
       loadRuns('succeeded');
-      runService.error.set('Failed to load runs');
+      runService.error.set('errors.loadRuns');
       fixture.detectChanges();
 
       expect(el('dashboard-error')).not.toBeNull();
       expect(text('stat-total-runs')).toBe('1');
     });
 
-    it('shows no banner when the project service alone fails: the page only reads run errors', () => {
+    it('reports a project-loading failure too, not just run errors', () => {
       setup();
-      // Comportement ACTUEL épinglé : le tableau de bord n'affiche que `runService.error`,
-      // une panne de la liste des projets reste donc silencieuse (cf. rapport).
-      projectService.error.set('Failed to load projects');
+      // La page charge deux ressources indépendantes. N'en afficher qu'une erreur laissait le
+      // panneau des projets montrer son état vide — indiscernable d'une organisation qui n'a
+      // réellement aucun projet.
+      projectService.error.set('errors.loadProjects');
       fixture.detectChanges();
 
-      expect(el('dashboard-error')).toBeNull();
+      expect(el('dashboard-error')).not.toBeNull();
+      expect(el('dashboard-error')!.textContent).toContain('errors.loadProjects');
+    });
+
+    it('says the projects could not be loaded instead of claiming there are none', () => {
+      setup();
+      projectService.error.set('errors.loadProjects');
+      fixture.detectChanges();
+
+      expect(el('projects-failed')).not.toBeNull();
+      expect(el('projects-empty')).toBeNull();
+    });
+
+    it('still shows the empty state when the projects genuinely loaded and there are none', () => {
+      setup();
+      fixture.detectChanges();
+
+      expect(el('projects-empty')).not.toBeNull();
+      expect(el('projects-failed')).toBeNull();
     });
   });
 
@@ -347,7 +366,7 @@ describe('DashboardComponent', () => {
 
     it('keeps showing the projects when the runs failed to load', () => {
       setup();
-      runService.error.set('Failed to load runs');
+      runService.error.set('errors.loadRuns');
       projectService.projects.set([project()]);
       fixture.detectChanges();
 

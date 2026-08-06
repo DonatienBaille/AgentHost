@@ -115,10 +115,10 @@ describe('RunsListComponent', () => {
   describe('error state', () => {
     it('shows the service error and suppresses the empty block', () => {
       setup();
-      runService.error.set('Failed to load runs');
+      runService.error.set('errors.loadRuns');
       fixture.detectChanges();
 
-      expect(el('runs-error')!.textContent).toContain('Failed to load runs');
+      expect(el('runs-error')!.textContent).toContain('errors.loadRuns');
       // L'état vide est réservé au « rien à afficher » légitime, pas à l'échec de chargement.
       expect(el('runs-empty')).toBeNull();
     });
@@ -126,7 +126,7 @@ describe('RunsListComponent', () => {
     it('still renders the cards it holds when an error arrives', () => {
       setup();
       runService.runs.set([run('succeeded', { id: 'r1' })]);
-      runService.error.set('Failed to load runs');
+      runService.error.set('errors.loadRuns');
       fixture.detectChanges();
 
       expect(el('runs-error')).not.toBeNull();

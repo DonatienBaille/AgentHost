@@ -66,7 +66,7 @@ describe('MemoryService', () => {
 
     await service.load('p1');
 
-    expect(service.error()).toBe('Failed to load memory for project p1');
+    expect(service.error()).toBe('errors.loadMemory');
     expect(service.memory()).toBeNull();
     expect(service.isLoading()).toBe(false);
     expect(signalR.joinProjectMemory).toHaveBeenCalledWith('p1');
@@ -178,7 +178,7 @@ describe('MemoryService', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(service.error()).toBe('Failed to load memory for project p1');
+    expect(service.error()).toBe('errors.loadMemory');
     // The stale snapshot is still on screen — which is exactly why the error must be visible.
     expect(service.memory()?.notes[0].text).toBe('a');
   });

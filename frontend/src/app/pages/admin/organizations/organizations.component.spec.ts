@@ -85,10 +85,10 @@ describe('OrganizationsComponent', () => {
 
     it('renders the service error message', () => {
       setup();
-      orgService.error.set('Failed to load organizations');
+      orgService.error.set('errors.loadOrganizations');
       fixture.detectChanges();
 
-      expect(el('orgs-error')!.textContent).toContain('Failed to load organizations');
+      expect(el('orgs-error')!.textContent).toContain('errors.loadOrganizations');
     });
 
     it('renders one row per organization with the displayed fields', () => {

@@ -23,7 +23,7 @@ export class WebhookService {
       this.webhooks.set(data ?? []);
       this.error.set(null);
     } catch (err) {
-      this.error.set('Failed to load webhooks');
+      this.error.set('errors.loadWebhooks');
     } finally {
       this.isLoading.set(false);
     }

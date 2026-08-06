@@ -50,3 +50,13 @@ export interface CreateUserRequest {
   displayName?: string;
   role: UserRole;
 }
+
+/**
+ * Mise à jour partielle : le serveur n'applique que les champs présents
+ * (backend Endpoints/UserEndpoints.cs, UpdateUser). L'email n'est pas modifiable.
+ */
+export interface UpdateUserRequest {
+  displayName?: string;
+  role?: UserRole;
+  password?: string;
+}

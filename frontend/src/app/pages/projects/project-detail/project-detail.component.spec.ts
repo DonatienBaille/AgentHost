@@ -164,12 +164,12 @@ describe('ProjectDetailComponent', () => {
 
     it('renders the error signal of the service', () => {
       setup();
-      projectService.error.set('Failed to load project p1');
+      projectService.error.set('errors.loadProject');
       fixture.detectChanges();
 
       const banner = el('project-error');
       expect(banner).not.toBeNull();
-      expect(banner!.textContent).toContain('Failed to load project p1');
+      expect(banner!.textContent).toContain('errors.loadProject');
     });
 
     it('shows the spinner while loading', () => {
@@ -184,7 +184,7 @@ describe('ProjectDetailComponent', () => {
       setup();
       // Comportement ACTUEL épinglé : les deux blocs sont indépendants, ils peuvent coexister.
       projectService.isLoading.set(true);
-      projectService.error.set('Failed to load project p1');
+      projectService.error.set('errors.loadProject');
       fixture.detectChanges();
 
       expect(fixture.nativeElement.querySelector('.animate-spin')).not.toBeNull();

@@ -173,7 +173,13 @@
     "role": "Role",
     "createdAt": "Created",
     "empty": "No users yet.",
-    "createError": "Failed to create user."
+    "createError": "Failed to create user.",
+    "actions": "Actions",
+    "changeRole": "Change role",
+    "itsYou": "That's you",
+    "updateError": "Failed to update this member.",
+    "deleteError": "Failed to delete this member.",
+    "forbidden": "Your role does not allow managing the organization's members."
   },
   "roles": {
     "owner": "Owner",
@@ -224,7 +230,8 @@
     "activate": "Activate",
     "deactivate": "Deactivate",
     "empty": "No webhooks for this project yet.",
-    "createError": "Failed to create webhook."
+    "createError": "Failed to create webhook.",
+    "forbidden": "Your role does not allow managing webhooks."
   },
   "adminAudit": {
     "title": "Audit log",
@@ -232,13 +239,32 @@
     "actor": "Actor",
     "resource": "Resource",
     "timestamp": "Timestamp",
-    "empty": "No audit log entries yet."
+    "empty": "No audit log entries yet.",
+    "forbidden": "Your role does not allow viewing the audit log."
   },
   "errors": {
     "network": "Network error: unable to reach the server.",
     "requestFailed": "Request failed",
     "forbidden": "Insufficient permissions: your role does not allow this action.",
-    "sessionExpired": "Your session has expired. Please sign in again."
+    "sessionExpired": "Your session has expired. Please sign in again.",
+    "loadUsers": "Failed to load users.",
+    "loadOrganizations": "Failed to load organizations.",
+    "loadWebhooks": "Failed to load webhooks.",
+    "loadAuditLog": "Failed to load the audit log.",
+    "loadAgents": "Failed to load agents.",
+    "loadAgent": "Failed to load this agent.",
+    "loadAgentVersions": "Failed to load this agent's versions.",
+    "loadProjects": "Failed to load projects.",
+    "loadProject": "Failed to load this project.",
+    "loadRuns": "Failed to load runs.",
+    "loadRun": "Failed to load this run.",
+    "loadRunEvents": "Failed to load this run's events.",
+    "loadMemory": "Failed to load this project's memory.",
+    "createRun": "Failed to create the run.",
+    "cancelRun": "Failed to cancel the run.",
+    "approveRun": "Failed to record the decision.",
+    "answerQuestion": "Failed to send the answer.",
+    "loadArtifacts": "Failed to load artifacts."
   },
   "approvalType": {
     "gate": "Gate",

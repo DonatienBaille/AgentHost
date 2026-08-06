@@ -3,23 +3,31 @@
 <div class="p-6 max-w-5xl mx-auto" [formGroup]="form">
   <div class="flex items-center justify-between mb-8">
     <h1 class="text-3xl font-bold">{{ 'adminWebhooks.title' | translate }}</h1>
-    <button
-      type="button"
-      data-testid="new-webhook"
-      class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
-      (click)="toggleForm()"
-    >
-      {{ (showForm() ? 'common.cancel' : 'adminWebhooks.newWebhook') | translate }}
-    </button>
+    @if (canManage()) {
+      <button
+        type="button"
+        data-testid="new-webhook"
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
+        (click)="toggleForm()"
+      >
+        {{ (showForm() ? 'common.cancel' : 'adminWebhooks.newWebhook') | translate }}
+      </button>
+    }
   </div>
+
+  @if (!canManage()) {
+    <p data-testid="webhooks-read-only" class="text-gray-400 text-sm mb-6">
+      {{ 'adminWebhooks.forbidden' | translate }}
+    </p>
+  }
 
   @if (error()) {
     <div data-testid="webhooks-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
-      <p class="text-red-200">{{ error() }}</p>
+      <p class="text-red-200">{{ error()! | translate }}</p>
     </div>
   }
 
-  @if (showForm()) {
+  @if (showForm() && canManage()) {
     <form (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
       @if (submitError()) {
         <div class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
@@ -88,24 +96,26 @@
             >
               {{ (webhook.isActive ? 'adminWebhooks.active' : 'adminWebhooks.inactive') | translate }}
             </span>
-            <button
-              type="button"
-              data-testid="toggle-webhook"
-              [disabled]="busyId() === webhook.id"
-              class="text-blue-400 hover:text-blue-300 text-xs disabled:opacity-50"
-              (click)="toggleActive(webhook)"
-            >
-              {{ (webhook.isActive ? 'adminWebhooks.deactivate' : 'adminWebhooks.activate') | translate }}
-            </button>
-            <button
-              type="button"
-              data-testid="delete-webhook"
-              [disabled]="busyId() === webhook.id"
-              class="text-red-400 hover:text-red-300 text-xs disabled:opacity-50"
-              (click)="remove(webhook.id)"
-            >
-              {{ 'common.delete' | translate }}
-            </button>
+            @if (canManage()) {
+              <button
+                type="button"
+                data-testid="toggle-webhook"
+                [disabled]="busyId() === webhook.id"
+                class="text-blue-400 hover:text-blue-300 text-xs disabled:opacity-50"
+                (click)="toggleActive(webhook)"
+              >
+                {{ (webhook.isActive ? 'adminWebhooks.deactivate' : 'adminWebhooks.activate') | translate }}
+              </button>
+              <button
+                type="button"
+                data-testid="delete-webhook"
+                [disabled]="busyId() === webhook.id"
+                class="text-red-400 hover:text-red-300 text-xs disabled:opacity-50"
+                (click)="remove(webhook.id)"
+              >
+                {{ 'common.delete' | translate }}
+              </button>
+            }
           </div>
         </div>
       </div>

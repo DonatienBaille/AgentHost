@@ -94,7 +94,7 @@ describe('RunService', () => {
       httpMock.expectOne(`${URL}?skip=0&take=50`).flush(null, { status: 500, statusText: 'Err' });
       await pending;
 
-      expect(service.error()).toBe('Failed to load runs');
+      expect(service.error()).toBe('errors.loadRuns');
       expect(service.isLoading()).toBe(false);
     });
   });
@@ -144,7 +144,7 @@ describe('RunService', () => {
       httpMock.expectOne(URL).flush(null, { status: 402, statusText: 'Payment Required' });
 
       await expect(pending).rejects.toBeTruthy();
-      expect(service.error()).toBe('Failed to create run');
+      expect(service.error()).toBe('errors.createRun');
       expect(service.isLoading()).toBe(false);
       expect(service.runs()).toEqual([]);
     });
@@ -188,7 +188,7 @@ describe('RunService', () => {
       httpMock.expectOne(`${URL}/r1/approve`).flush(null, { status: 403, statusText: 'Forbidden' });
 
       await expect(pending).rejects.toBeTruthy();
-      expect(service.error()).toBe('Failed to approve run r1');
+      expect(service.error()).toBe('errors.approveRun');
     });
   });
 
@@ -216,7 +216,7 @@ describe('RunService', () => {
       httpMock.expectOne(`${URL}/r1/answer`).flush(null, { status: 409, statusText: 'Conflict' });
 
       await expect(pending).rejects.toBeTruthy();
-      expect(service.error()).toBe('Failed to answer question for run r1');
+      expect(service.error()).toBe('errors.answerQuestion');
     });
   });
 
@@ -239,7 +239,7 @@ describe('RunService', () => {
       httpMock.expectOne(`${URL}/r1/cancel`).flush(null, { status: 500, statusText: 'Err' });
 
       await expect(pending).rejects.toBeTruthy();
-      expect(service.error()).toBe('Failed to cancel run r1');
+      expect(service.error()).toBe('errors.cancelRun');
     });
   });
 
@@ -261,7 +261,7 @@ describe('RunService', () => {
       const pending = service.fetchRun('r9');
       httpMock.expectOne(`${URL}/r9`).flush(null, { status: 404, statusText: 'Not Found' });
       await pending;
-      expect(service.error()).toBe('Failed to load run r9');
+      expect(service.error()).toBe('errors.loadRun');
     });
 
     it('fetchApprovals GETs the approvals sub-resource', async () => {
@@ -290,7 +290,7 @@ describe('RunService', () => {
       });
 
       await expect(pending).rejects.toBeTruthy();
-      expect(service.error()).toBe('Failed to load events for run r1');
+      expect(service.error()).toBe('errors.loadRunEvents');
     });
 
     it('fetchLogs unwraps the logs envelope', async () => {

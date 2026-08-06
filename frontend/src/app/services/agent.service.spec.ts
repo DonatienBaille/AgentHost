@@ -82,7 +82,7 @@ describe('AgentService', () => {
       httpMock.expectOne(URL).flush(null, { status: 500, statusText: 'Server Error' });
       await pending;
 
-      expect(service.error()).toBe('Failed to load agents');
+      expect(service.error()).toBe('errors.loadAgents');
       expect(service.isLoading()).toBe(false);
     });
   });
@@ -145,12 +145,14 @@ describe('AgentService', () => {
       expect(service.agents()[0].name).toBe('Renamed');
     });
 
-    it('resolves null and records the error on failure', async () => {
+    // Renvoyer `null` en cas d'échec laissait le `catch` de l'appelant inerte : la page de détail
+    // affichait un corps entièrement vide sur un identifiant inconnu. La méthode lève désormais.
+    it('rethrows on failure instead of resolving null', async () => {
       const pending = service.fetchAgent('a9');
       httpMock.expectOne(`${URL}/a9`).flush(null, { status: 404, statusText: 'Not Found' });
 
-      expect(await pending).toBeNull();
-      expect(service.error()).toBe('Failed to load agent a9');
+      await expect(pending).rejects.toBeTruthy();
+      expect(service.error()).toBe('errors.loadAgent');
       expect(service.isLoading()).toBe(false);
     });
   });
@@ -174,7 +176,7 @@ describe('AgentService', () => {
       httpMock.expectOne(`${URL}/a1/versions`).flush(null, { status: 500, statusText: 'Err' });
 
       await expect(pending).rejects.toBeTruthy();
-      expect(service.error()).toBe('Failed to load versions for agent a1');
+      expect(service.error()).toBe('errors.loadAgentVersions');
       expect(service.isLoadingVersions()).toBe(false);
     });
 

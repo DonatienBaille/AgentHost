@@ -21,7 +21,7 @@ export class OrganizationService {
       this.organizations.set(data ?? []);
       this.error.set(null);
     } catch (err) {
-      this.error.set('Failed to load organizations');
+      this.error.set('errors.loadOrganizations');
     } finally {
       this.isLoading.set(false);
     }

@@ -387,7 +387,7 @@ describe('NewRunFormComponent', () => {
       await component.submit();
       fixture.detectChanges();
 
-      expect(el('submit-error')!.textContent).toContain('Failed to create run');
+      expect(el('submit-error')!.textContent).toContain('errors.createRun');
       expect(navigate).not.toHaveBeenCalled();
       expect(component.isSubmitting()).toBe(false);
     });

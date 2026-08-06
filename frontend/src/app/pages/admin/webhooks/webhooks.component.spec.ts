@@ -107,10 +107,10 @@ describe('WebhooksComponent', () => {
 
     it('renders the service error message', () => {
       setup();
-      webhookService.error.set('Failed to load webhooks');
+      webhookService.error.set('errors.loadWebhooks');
       fixture.detectChanges();
 
-      expect(el('webhooks-error')!.textContent).toContain('Failed to load webhooks');
+      expect(el('webhooks-error')!.textContent).toContain('errors.loadWebhooks');
     });
 
     it('renders one card per webhook with url, events and active state', () => {
@@ -167,44 +167,62 @@ describe('WebhooksComponent', () => {
 
   describe('role gating', () => {
     /**
-     * MANQUE CONSTATÉ : la page n'a aucune barriere de role — WebhooksComponent n'injecte meme
-     * pas AuthService, et la route `admin/webhooks/:projectId` ne pose que `authGuard`. Creer,
-     * (des)activer et supprimer un webhook — donc rediriger les evenements d'un projet vers une
-     * URL arbitraire — est offert a un viewer.
-     * Ces tests epinglent le comportement ACTUEL ; ils devront etre inverses une fois la
-     * barriere ajoutee.
+     * Le serveur exige `maintainer` sur POST/PUT/DELETE /api/webhooks. La page n'injectait même
+     * pas AuthService : créer, (dés)activer et supprimer un webhook — donc rediriger les
+     * événements d'un projet vers une URL arbitraire — était offert à un viewer, qui ne récoltait
+     * qu'un 403 après avoir rempli le formulaire.
      */
-    it('offers every action to an owner', () => {
-      setup('owner');
+    it.each<UserRole>(['owner', 'maintainer'])('offers every action to a %s', (role) => {
+      setup(role);
       webhookService.webhooks.set([webhook()]);
       fixture.detectChanges();
 
       expect(el('new-webhook')).not.toBeNull();
       expect(all('toggle-webhook').length).toBe(1);
       expect(all('delete-webhook').length).toBe(1);
+      expect(el('webhooks-read-only')).toBeNull();
     });
 
     it.each<UserRole>(['developer', 'viewer'])(
-      'also offers every destructive action to a %s (missing role gate)',
+      'gives a %s a read-only page, with a reason',
       (role) => {
         setup(role);
         webhookService.webhooks.set([webhook()]);
         fixture.detectChanges();
 
-        expect(el('new-webhook')).not.toBeNull();
-        expect(all('toggle-webhook').length).toBe(1);
-        expect(all('delete-webhook').length).toBe(1);
+        expect(el('new-webhook')).toBeNull();
+        expect(all('toggle-webhook').length).toBe(0);
+        expect(all('delete-webhook').length).toBe(0);
+        // La liste reste visible — la lecture est permise — mais la page dit pourquoi elle est inerte.
+        expect(all('webhook-row').length).toBe(1);
+        expect(el('webhooks-read-only')).not.toBeNull();
       },
     );
 
-    it('opens the full create form for a viewer (missing role gate)', () => {
+    it('does not render the create form for a viewer, even if the signal is forced', () => {
       setup('viewer');
 
       component.toggleForm();
       fixture.detectChanges();
 
-      expect(fixture.nativeElement.querySelector('#w-url')).not.toBeNull();
-      expect(fixture.nativeElement.querySelector('#w-secret')).not.toBeNull();
+      expect(fixture.nativeElement.querySelector('#w-url')).toBeNull();
+      expect(fixture.nativeElement.querySelector('#w-secret')).toBeNull();
+    });
+
+    it('refuses a forced create, toggle or delete from an under-privileged user', async () => {
+      setup('viewer');
+      const existing = webhook();
+      webhookService.webhooks.set([existing]);
+      fixture.detectChanges();
+
+      component.form.patchValue({ url: 'https://evil.example/hook' });
+      await component.submit();
+      await component.toggleActive(existing);
+      await component.remove(existing.id);
+
+      expect(webhookService.createWebhook).not.toHaveBeenCalled();
+      expect(webhookService.updateWebhook).not.toHaveBeenCalled();
+      expect(webhookService.deleteWebhook).not.toHaveBeenCalled();
     });
   });
 

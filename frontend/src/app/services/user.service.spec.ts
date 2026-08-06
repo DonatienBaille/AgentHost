@@ -54,7 +54,7 @@ describe('UserService', () => {
     httpMock.expectOne(URL).flush(null, { status: 403, statusText: 'Forbidden' });
     await pending;
 
-    expect(service.error()).toBe('Failed to load users');
+    expect(service.error()).toBe('errors.loadUsers');
     expect(service.isLoading()).toBe(false);
   });
 

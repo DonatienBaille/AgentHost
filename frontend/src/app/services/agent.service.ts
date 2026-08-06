@@ -33,13 +33,22 @@ export class AgentService {
       this.agents.set(data ?? []);
       this.error.set(null);
     } catch (err) {
-      this.error.set('Failed to load agents');
+      this.error.set('errors.loadAgents');
     } finally {
       this.isLoading.set(false);
     }
   }
 
-  async fetchAgent(id: string): Promise<Agent | null> {
+  /**
+   * Charge un agent, ou **lève** si le serveur refuse.
+   *
+   * Cette méthode renvoyait `null` en cas d'échec en s'étant contentée de poser `error`. Le
+   * `catch` de l'appelant ne s'exécutait donc jamais : sur un identifiant inconnu, la page de
+   * détail affichait un corps entièrement vide — ni agent, ni erreur, ni « introuvable ». Un
+   * `Agent | null` où `null` veut dire « ça a échoué mais je l'ai noté ailleurs » est précisément
+   * le contrat qui produit ce genre de page morte.
+   */
+  async fetchAgent(id: string): Promise<Agent> {
     this.isLoading.set(true);
     try {
       const agent = await firstValueFrom(this.http.get<Agent>(`${BASE_URL}/${id}`));
@@ -55,8 +64,8 @@ export class AgentService {
       this.error.set(null);
       return agent;
     } catch (err) {
-      this.error.set(`Failed to load agent ${id}`);
-      return null;
+      this.error.set('errors.loadAgent');
+      throw err;
     } finally {
       this.isLoading.set(false);
     }
@@ -78,7 +87,7 @@ export class AgentService {
       this.versions.set(versions ?? []);
       return versions ?? [];
     } catch (err) {
-      this.error.set(`Failed to load versions for agent ${agentId}`);
+      this.error.set('errors.loadAgentVersions');
       throw err;
     } finally {
       this.isLoadingVersions.set(false);

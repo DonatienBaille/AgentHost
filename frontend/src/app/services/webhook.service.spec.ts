@@ -64,7 +64,7 @@ describe('WebhookService', () => {
     httpMock.expectOne(`${URL}?projectId=p1`).flush(null, { status: 500, statusText: 'Err' });
     await pending;
 
-    expect(service.error()).toBe('Failed to load webhooks');
+    expect(service.error()).toBe('errors.loadWebhooks');
     expect(service.isLoading()).toBe(false);
   });
 

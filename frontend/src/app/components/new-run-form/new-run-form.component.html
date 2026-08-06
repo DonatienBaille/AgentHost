@@ -67,7 +67,7 @@
 
         @if (submitError()) {
           <div data-testid="submit-error" class="bg-red-900/50 border border-red-700 rounded-lg p-3">
-            <p class="text-red-200 text-sm">{{ submitError() }}</p>
+            <p class="text-red-200 text-sm">{{ submitError()! | translate }}</p>
           </div>
         }
 

@@ -173,7 +173,13 @@
     "role": "Rôle",
     "createdAt": "Créé le",
     "empty": "Aucun utilisateur pour le moment.",
-    "createError": "Échec de la création de l'utilisateur."
+    "createError": "Échec de la création de l'utilisateur.",
+    "actions": "Actions",
+    "changeRole": "Changer le rôle",
+    "itsYou": "C'est vous",
+    "updateError": "Échec de la modification de ce membre.",
+    "deleteError": "Échec de la suppression de ce membre.",
+    "forbidden": "Votre rôle ne permet pas de gérer les membres de l'organisation."
   },
   "roles": {
     "owner": "Propriétaire",
@@ -224,7 +230,8 @@
     "activate": "Activer",
     "deactivate": "Désactiver",
     "empty": "Aucun webhook pour ce projet.",
-    "createError": "Échec de la création du webhook."
+    "createError": "Échec de la création du webhook.",
+    "forbidden": "Votre rôle ne permet pas de gérer les webhooks."
   },
   "adminAudit": {
     "title": "Journal d'audit",
@@ -232,13 +239,32 @@
     "actor": "Acteur",
     "resource": "Ressource",
     "timestamp": "Horodatage",
-    "empty": "Aucune entrée dans le journal d'audit."
+    "empty": "Aucune entrée dans le journal d'audit.",
+    "forbidden": "Votre rôle ne permet pas de consulter le journal d'audit."
   },
   "errors": {
     "network": "Erreur réseau : le serveur est injoignable.",
     "requestFailed": "Échec de la requête",
     "forbidden": "Permissions insuffisantes : votre rôle ne permet pas cette action.",
-    "sessionExpired": "Votre session a expiré. Veuillez vous reconnecter."
+    "sessionExpired": "Votre session a expiré. Veuillez vous reconnecter.",
+    "loadUsers": "Échec du chargement des utilisateurs.",
+    "loadOrganizations": "Échec du chargement des organisations.",
+    "loadWebhooks": "Échec du chargement des webhooks.",
+    "loadAuditLog": "Échec du chargement du journal d'audit.",
+    "loadAgents": "Échec du chargement des agents.",
+    "loadAgent": "Échec du chargement de cet agent.",
+    "loadAgentVersions": "Échec du chargement des versions de cet agent.",
+    "loadProjects": "Échec du chargement des projets.",
+    "loadProject": "Échec du chargement de ce projet.",
+    "loadRuns": "Échec du chargement des runs.",
+    "loadRun": "Échec du chargement de ce run.",
+    "loadRunEvents": "Échec du chargement des événements de ce run.",
+    "loadMemory": "Échec du chargement de la mémoire de ce projet.",
+    "createRun": "Échec de la création du run.",
+    "cancelRun": "Échec de l'annulation du run.",
+    "approveRun": "Échec de l'enregistrement de la décision.",
+    "answerQuestion": "Échec de l'envoi de la réponse.",
+    "loadArtifacts": "Échec du chargement des artefacts."
   },
   "approvalType": {
     "gate": "Validation",

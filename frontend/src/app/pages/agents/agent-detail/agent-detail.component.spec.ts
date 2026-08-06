@@ -151,37 +151,51 @@ describe('AgentDetailComponent', () => {
   });
 
   describe('missing agent', () => {
-    it('renders a blank page when the agent does not exist', async () => {
+    // Le service renvoyait `null` sur un 404 en s'étant contenté de poser son propre signal
+    // d'erreur ; le `catch` de `load()` ne s'exécutait donc jamais et la page rendait un corps
+    // entièrement vide — ni agent, ni erreur, ni « introuvable ». Le service lève désormais.
+    it('says the agent could not be loaded instead of rendering a blank page', async () => {
       await setup('developer', { id: 'nope' }, (s) => {
-        // Le vrai service avale le 404 et renvoie null au lieu de rejeter.
-        s.fetchAgent.mockResolvedValue(null);
+        s.fetchAgent.mockRejectedValue(new Error('404'));
       });
 
-      // Comportement ACTUEL épinglé : `load()` n'entre jamais dans son `catch`, donc
-      // `loadError` reste nul et la page n'affiche NI l'agent NI le moindre message.
-      // C'est un vrai défaut, signalé dans le rapport (agent-detail.component.ts:54-61).
       expect(component.agent()).toBeNull();
-      expect(component.loadError()).toBeNull();
-      expect(el('agent-load-error')).toBeNull();
+      expect(component.loadError()).toBe('agentDetail.loadError');
+      expect(el('agent-load-error')).not.toBeNull();
       expect(el('agent-name')).toBeNull();
       expect(el('publish-panel')).toBeNull();
     });
 
     it('leaves the publish form empty when there is no agent to prefill it from', async () => {
       await setup('developer', { id: 'nope' }, (s) => {
-        s.fetchAgent.mockResolvedValue(null);
+        s.fetchAgent.mockRejectedValue(new Error('404'));
       });
 
       expect(component.publishForm.getRawValue().manifestYaml).toBe('');
     });
 
-    it('still asks for the versions of an agent it could not load', async () => {
+    it('does not ask for the versions of an agent it could not load', async () => {
       await setup('developer', { id: 'nope' }, (s) => {
-        s.fetchAgent.mockResolvedValue(null);
+        s.fetchAgent.mockRejectedValue(new Error('404'));
       });
 
-      // Comportement ACTUEL épinglé : le second appel n'est pas conditionné au premier.
-      expect(agentService.listVersions).toHaveBeenCalledWith('nope');
+      // Un second appel voué à échouer, dont la seule conséquence visible serait une deuxième
+      // bulle d'erreur pour la même cause.
+      expect(agentService.listVersions).not.toHaveBeenCalled();
+    });
+
+    it('drops the previously loaded agent when navigating to an unknown id', async () => {
+      await setup('developer', { id: 'ag1' });
+      expect(component.agent()).not.toBeNull();
+
+      agentService.fetchAgent.mockRejectedValue(new Error('404'));
+      await component.ngOnInit();
+      await Promise.resolve();
+      fixture.detectChanges();
+
+      // Garder l'ancien afficherait le mauvais agent sous un message d'erreur.
+      expect(component.agent()).toBeNull();
+      expect(el('agent-name')).toBeNull();
     });
 
     it('shows the load error when the fetch rejects outright', async () => {
@@ -287,15 +301,15 @@ describe('AgentDetailComponent', () => {
       expect(all('version-row').length).toBe(1);
     });
 
-    it('does not stop a viewer who forces publish — the server is the real gate', async () => {
+    it('refuses a forced publish from a viewer', async () => {
       await setup('viewer');
       component.publishForm.setValue({ manifestYaml: 'name: a' });
 
-      // Comportement ACTUEL épinglé : `publish()` ne revérifie pas `canPublish()`, seul le
-      // masquage du panneau protège l'IHM (cf. rapport).
+      // Masquer le panneau n'empêche pas d'atteindre la méthode. Le serveur reste l'autorité —
+      // cette garde est de la défense en profondeur.
       await component.publish();
 
-      expect(agentService.publishVersion).toHaveBeenCalledTimes(1);
+      expect(agentService.publishVersion).not.toHaveBeenCalled();
     });
   });
 

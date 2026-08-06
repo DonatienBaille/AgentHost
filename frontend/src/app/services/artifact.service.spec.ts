@@ -59,7 +59,7 @@ describe('ArtifactService', () => {
     httpMock.expectOne(`${RUNS}/r1/artifacts`).flush(null, { status: 500, statusText: 'Err' });
     await pending;
 
-    expect(service.error()).toBe('Failed to load artifacts');
+    expect(service.error()).toBe('errors.loadArtifacts');
     expect(service.isLoading()).toBe(false);
   });
 

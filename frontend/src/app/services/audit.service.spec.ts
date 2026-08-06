@@ -83,7 +83,7 @@ describe('AuditService', () => {
     httpMock.expectOne(url('o1', 0, 100)).flush(null, { status: 403, statusText: 'Forbidden' });
     await pending;
 
-    expect(service.error()).toBe('Failed to load audit log');
+    expect(service.error()).toBe('errors.loadAuditLog');
     expect(service.isLoading()).toBe(false);
   });
 });

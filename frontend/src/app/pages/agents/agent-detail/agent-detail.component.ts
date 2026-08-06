@@ -50,17 +50,27 @@ export class AgentDetailComponent implements OnInit {
 
   private async load(id: string): Promise<void> {
     this.isLoading.set(true);
+    let loaded = false;
     try {
       const agent = await this.agentService.fetchAgent(id);
       this.agent.set(agent);
-      if (agent) {
-        this.publishForm.patchValue({ manifestYaml: agent.manifestYaml });
-      }
+      this.publishForm.patchValue({ manifestYaml: agent.manifestYaml });
       this.loadError.set(null);
+      loaded = true;
     } catch {
+      // L'agent précédent doit disparaître : sur une navigation d'un agent existant vers un
+      // identifiant inconnu, le garder afficherait le mauvais agent sous un message d'erreur.
+      this.agent.set(null);
       this.loadError.set('agentDetail.loadError');
     } finally {
       this.isLoading.set(false);
+    }
+
+    // Inutile de demander les versions d'un agent qui n'existe pas : c'est un second appel voué à
+    // échouer, dont la seule conséquence visible serait une deuxième bulle d'erreur.
+    if (!loaded) {
+      this.agentService.versions.set([]);
+      return;
     }
 
     try {
@@ -71,6 +81,10 @@ export class AgentDetailComponent implements OnInit {
   }
 
   async publish(): Promise<void> {
+    // Revérifié hors du gabarit : le `@if` masque le bouton, il n'empêche pas d'appeler la
+    // méthode. Le serveur reste l'autorité — c'est de la défense en profondeur.
+    if (!this.canPublish()) return;
+
     const id = this.agentId;
     if (!id || this.publishForm.invalid) {
       this.publishForm.markAllAsTouched();

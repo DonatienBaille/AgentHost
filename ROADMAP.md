@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-293 tests backend, 558 tests frontend, 8 tests end-to-end Playwright, build sans warning.
+293 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
 contient** concrètement, et **à quoi on reconnaît qu'il est fini**. L'ordre est un défaut
@@ -12,7 +12,7 @@ la priorité business le demande.
 
 ## Lot 0 — Tests complets de l'IHM ✅ terminé
 
-**Livré.** 28 → 558 tests frontend, plus 8 tests end-to-end Playwright contre la vraie pile.
+**Livré.** 28 → 575 tests frontend, plus 8 tests end-to-end Playwright contre la vraie pile.
 Les 16 composants et pages ont un spec, tous les services sont couverts contre
 `provideHttpClientTesting`, les gardes et le routage aussi, et le temps réel est testé avec un hub
 simulé (événements de run, changements d'état, approbation qui arrive sur le fil, mémoire de
@@ -29,27 +29,33 @@ Deux réserves à connaître :
   dépendant de l'ordre de chargement. Corrigé par `frontend/vitest.config.ts` ; la suite passe de
   ~3 s à ~23 s. À garder en tête si quelqu'un est tenté de retirer ce fichier.
 
-**Défauts d'IHM découverts pendant l'écriture des tests** — tous épinglés par un test qui constate
-le comportement actuel, avec un commentaire l'expliquant, pour que les corriger soit une décision
-explicite. À traiter au fil de l'eau :
+**Défauts d'IHM découverts pendant l'écriture des tests** — les 7 sont **corrigés**. Chacun était
+épinglé par un test décrivant le comportement fautif ; ces tests ont été retournés, ce qui rend la
+correction visible dans l'historique.
 
-1. Un agent introuvable rend une page **vide** : `agent.service.ts:57-60` avale le 404 et retourne
-   `null`, donc le `catch` de `agent-detail.component.ts:54-64` ne s'exécute jamais et son bloc
-   d'erreur dédié ne s'affiche pas. Seule reste une bulle générique en bas à droite.
-2. Les pages **utilisateurs**, **webhooks** et **journal d'audit** n'ont aucune barrière de rôle
-   côté IHM, alors que le serveur exige `maintainer` sur ces routes. Ce ne sont donc pas des
-   failles — mais un `viewer` remplit un formulaire pour récolter un 403.
-   `users.component.ts:20` injecte `AuthService` sans jamais s'en servir : la barrière était prévue.
-3. Messages d'erreur **anglais codés en dur** rendus non traduits dans une application en français
-   par défaut (`user.service.ts:25`, `organization.service.ts:24`, `webhook.service.ts:26`,
-   `audit.service.ts:27`). `SecretService` fait correctement l'inverse.
-4. `dashboard.component.ts:38` — comparateur de tri qui ne retourne jamais 0 : ordre indéfini pour
-   deux runs de même horodatage.
-5. Le tableau de bord n'affiche que `runService.error` : un échec de chargement des projets est
-   indiscernable d'une organisation sans projet.
-6. `submit()` / `publish()` (projets, agents) ne revérifient pas le rôle hors du `@if` du gabarit.
-7. La page utilisateurs n'offre **aucune action par ligne** : ni changement de rôle ni suppression,
-   alors que l'API le permet.
+1. **Agent introuvable → page vide.** `agent.service.fetchAgent` avalait le 404 et renvoyait
+   `null` en posant son propre signal d'erreur ; le `catch` de la page ne s'exécutait donc jamais
+   et le corps restait entièrement vide. La méthode lève désormais, la page affiche son bloc
+   d'erreur dédié, oublie l'agent précédent, et ne demande plus les versions d'un agent inexistant.
+2. **Barrières de rôle absentes** sur les pages utilisateurs, webhooks et journal d'audit, alors
+   que le serveur exige `maintainer`. Ajoutées, avec un message expliquant pourquoi la page est
+   inerte plutôt qu'un 403 générique après remplissage d'un formulaire. Le journal d'audit ne
+   demande plus au serveur ce qu'il n'a pas le droit de lire.
+3. **Messages d'erreur anglais codés en dur** dans une IHM en français : les 8 services passent
+   par des clés `errors.*`, présentes en `fr` et en `en`, et les 11 gabarits concernés les font
+   traverser `| translate`. Les clés inconnues étant rendues telles quelles, un message venant du
+   serveur passe sans dommage.
+4. **Comparateur de tri incohérent** dans le tableau de bord (ne renvoyait jamais 0) : remplacé
+   par `localeCompare`.
+5. **Le tableau de bord avalait les échecs de chargement des projets** : l'erreur est désormais
+   affichée, et le panneau dit « échec » au lieu de « aucun projet ».
+6. **`submit()` / `publish()` ne revérifiaient pas le rôle** hors du gabarit (projets, agents,
+   utilisateurs, webhooks) : garde ajoutée. Le serveur reste l'autorité — c'est de la défense en
+   profondeur.
+7. **Aucune action par ligne dans la page utilisateurs** : changement de rôle et suppression
+   ajoutés (`PUT`/`DELETE /api/users/{id}`), réservés à `maintainer+`. Sa propre ligne n'offre
+   aucune action : se rétrograder ou se supprimer pourrait priver l'organisation de son dernier
+   administrateur sans qu'aucun écran ne le dise.
 
 <details>
 <summary>Énoncé initial du lot</summary>

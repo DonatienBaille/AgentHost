@@ -30,7 +30,7 @@ export class ProjectService {
       this.projects.set(data ?? []);
       this.error.set(null);
     } catch (err) {
-      this.error.set('Failed to load projects');
+      this.error.set('errors.loadProjects');
     } finally {
       this.isLoading.set(false);
     }
@@ -51,7 +51,7 @@ export class ProjectService {
       }
       this.error.set(null);
     } catch (err) {
-      this.error.set(`Failed to load project ${id}`);
+      this.error.set('errors.loadProject');
     } finally {
       this.isLoading.set(false);
     }

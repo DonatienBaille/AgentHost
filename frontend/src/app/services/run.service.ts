@@ -80,7 +80,7 @@ export class RunService {
       this.runs.set(data ?? []);
       this.error.set(null);
     } catch (err) {
-      this.error.set('Failed to load runs');
+      this.error.set('errors.loadRuns');
     } finally {
       this.isLoading.set(false);
     }
@@ -93,7 +93,7 @@ export class RunService {
       this.upsertRun(run);
       this.error.set(null);
     } catch (err) {
-      this.error.set(`Failed to load run ${id}`);
+      this.error.set('errors.loadRun');
     } finally {
       this.isLoading.set(false);
     }
@@ -107,7 +107,7 @@ export class RunService {
       this.error.set(null);
       return run;
     } catch (err) {
-      this.error.set('Failed to create run');
+      this.error.set('errors.createRun');
       throw err;
     } finally {
       this.isLoading.set(false);
@@ -119,7 +119,7 @@ export class RunService {
       await firstValueFrom(this.http.post<void>(`${BASE_URL}/${id}/cancel`, {}));
       await this.fetchRun(id);
     } catch (err) {
-      this.error.set(`Failed to cancel run ${id}`);
+      this.error.set('errors.cancelRun');
       throw err;
     }
   }
@@ -130,7 +130,7 @@ export class RunService {
       await firstValueFrom(this.http.post<void>(`${BASE_URL}/${id}/approve`, req));
       await this.fetchRun(id);
     } catch (err) {
-      this.error.set(`Failed to approve run ${id}`);
+      this.error.set('errors.approveRun');
       throw err;
     }
   }
@@ -142,7 +142,7 @@ export class RunService {
       await firstValueFrom(this.http.post<void>(`${BASE_URL}/${id}/answer`, body));
       await this.fetchRun(id);
     } catch (err) {
-      this.error.set(`Failed to answer question for run ${id}`);
+      this.error.set('errors.answerQuestion');
       throw err;
     }
   }
@@ -158,7 +158,7 @@ export class RunService {
         this.http.get<RunEvent[]>(`${BASE_URL}/${id}/events?fromSeq=${fromSeq}`),
       );
     } catch (err) {
-      this.error.set(`Failed to load events for run ${id}`);
+      this.error.set('errors.loadRunEvents');
       throw err;
     }
   }

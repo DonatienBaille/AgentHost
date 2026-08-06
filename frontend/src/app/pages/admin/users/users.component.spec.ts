@@ -7,7 +7,7 @@ import { signal } from '@angular/core';
 import { UsersComponent } from './users.component';
 import { UserService } from '../../../services/user.service';
 import { AuthService } from '../../../services/auth.service';
-import { CreateUserRequest, User, UserRole } from '../../../core/models';
+import { CreateUserRequest, UpdateUserRequest, User, UserRole } from '../../../core/models';
 import { user } from '../../../core/testing/fixtures';
 
 /** Double du service : mêmes signaux que le vrai, aucun HTTP. */
@@ -17,6 +17,10 @@ class UserServiceStub {
   readonly error = signal<string | null>(null);
   readonly listUsers = vi.fn(async () => {});
   readonly createUser = vi.fn(async (req: CreateUserRequest) => user(req.role, { email: req.email }));
+  readonly updateUser = vi.fn(async (id: string, req: UpdateUserRequest) =>
+    user(req.role ?? 'developer', { id }),
+  );
+  readonly deleteUser = vi.fn(async (_id: string) => {});
 }
 
 describe('UsersComponent', () => {
@@ -79,12 +83,12 @@ describe('UsersComponent', () => {
 
     it('renders the service error message', () => {
       setup();
-      userService.error.set('Failed to load users');
+      userService.error.set('errors.loadUsers');
       fixture.detectChanges();
 
       const banner = fixture.nativeElement.querySelector('[data-testid="users-error"]');
       expect(banner).not.toBeNull();
-      expect(banner.textContent).toContain('Failed to load users');
+      expect(banner.textContent).toContain('errors.loadUsers');
     });
 
     it('renders one row per user with the displayed fields', () => {
@@ -113,36 +117,146 @@ describe('UsersComponent', () => {
 
   describe('role gating', () => {
     /**
-     * MANQUE CONSTATÉ : la page n'a aucune barrière de rôle. POST /api/users est réservé au
-     * serveur aux rôles élevés, mais le bouton « nouvel utilisateur » et son formulaire sont
-     * offerts à tout le monde, y compris un viewer — qui ne récoltera qu'un 403.
-     * Ces deux tests épinglent le comportement ACTUEL ; ils devront être inversés lorsque la
-     * barrière sera ajoutée.
+     * Le serveur exige `maintainer` sur POST/PUT/DELETE /api/users. `AuthService` était injecté
+     * dans le composant sans jamais être utilisé : la barrière était prévue et n'a jamais été
+     * posée, si bien qu'un viewer remplissait un formulaire de création pour ne récolter qu'un 403.
      */
-    it('offers the create button to an owner', () => {
-      setup('owner');
+    it.each<UserRole>(['owner', 'maintainer'])('offers the create button to a %s', (role) => {
+      setup(role);
       expect(fixture.nativeElement.querySelector('[data-testid="new-user"]')).not.toBeNull();
     });
 
-    it('also offers the create button to a viewer (missing role gate)', () => {
+    it.each<UserRole>(['developer', 'viewer'])(
+      'hides the create button and the whole form from a %s',
+      (role) => {
+        setup(role);
+        expect(fixture.nativeElement.querySelector('[data-testid="new-user"]')).toBeNull();
+
+        // Même en forçant l'ouverture : masquer un bouton ne suffit pas si le gabarit rend quand
+        // même le formulaire dès que le signal bascule.
+        component.toggleForm();
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('#u-email')).toBeNull();
+        expect(fixture.nativeElement.querySelector('#u-role')).toBeNull();
+      },
+    );
+
+    it('does not create when an under-privileged user forces submit', async () => {
       setup('viewer');
-      expect(fixture.nativeElement.querySelector('[data-testid="new-user"]')).not.toBeNull();
+      component.form.setValue({
+        email: 'sneaky@example.com',
+        password: 'hunter2hunter2',
+        displayName: '',
+        role: 'owner',
+      });
 
-      component.toggleForm();
-      fixture.detectChanges();
-      // Le formulaire complet est accessible à un viewer.
-      expect(fixture.nativeElement.querySelector('#u-email')).not.toBeNull();
-      expect(fixture.nativeElement.querySelector('#u-role')).not.toBeNull();
+      await component.submit();
+
+      expect(userService.createUser).not.toHaveBeenCalled();
     });
 
-    it('renders no role-changing control on the rows at all', () => {
+    it.each<UserRole>(['developer', 'viewer'])('renders no row action for a %s', (role) => {
+      setup(role);
+      userService.users.set([user('viewer', { id: 'u2' })]);
+      fixture.detectChanges();
+
+      expect(rows()[0].querySelector('[data-testid="edit-role"]')).toBeNull();
+      expect(rows()[0].querySelector('[data-testid="delete-user"]')).toBeNull();
+    });
+  });
+
+  describe('row actions', () => {
+    it('offers role change and deletion to a maintainer', () => {
+      setup('maintainer');
+      userService.users.set([user('viewer', { id: 'u2' })]);
+      fixture.detectChanges();
+
+      expect(rows()[0].querySelector('[data-testid="edit-role"]')).not.toBeNull();
+      expect(rows()[0].querySelector('[data-testid="delete-user"]')).not.toBeNull();
+    });
+
+    it('sends only the role on the update, leaving every other field untouched', async () => {
       setup('owner');
       userService.users.set([user('viewer', { id: 'u2' })]);
       fixture.detectChanges();
 
-      // MANQUE CONSTATÉ : aucune action par ligne (changer de rôle, supprimer) n'existe encore,
-      // donc rien à masquer côté rôle. Test de régression pour le jour où elles arriveront.
-      expect(rows()[0].querySelectorAll('button, select').length).toBe(0);
+      await component.changeRole('u2', 'maintainer');
+
+      expect(userService.updateUser).toHaveBeenCalledExactlyOnceWith('u2', { role: 'maintainer' });
+    });
+
+    it('closes the role editor once the change lands', async () => {
+      setup('owner');
+      userService.users.set([user('viewer', { id: 'u2' })]);
+      fixture.detectChanges();
+
+      component.toggleRoleEditor('u2');
+      expect(component.editingUserId()).toBe('u2');
+
+      await component.changeRole('u2', 'developer');
+      expect(component.editingUserId()).toBeNull();
+    });
+
+    it('deletes a member through the service', async () => {
+      setup('owner');
+      userService.users.set([user('viewer', { id: 'u2' })]);
+      fixture.detectChanges();
+
+      await component.remove('u2');
+
+      expect(userService.deleteUser).toHaveBeenCalledExactlyOnceWith('u2');
+    });
+
+    it('reports a failed update without losing the row', async () => {
+      setup('owner');
+      userService.users.set([user('viewer', { id: 'u2' })]);
+      fixture.detectChanges();
+      userService.updateUser.mockRejectedValueOnce(new Error('boom'));
+
+      await component.changeRole('u2', 'owner');
+      fixture.detectChanges();
+
+      expect(component.rowError()).toBe('adminUsers.updateError');
+      expect(rows().length).toBe(1);
+    });
+
+    it('reports a failed deletion', async () => {
+      setup('owner');
+      userService.users.set([user('viewer', { id: 'u2' })]);
+      fixture.detectChanges();
+      userService.deleteUser.mockRejectedValueOnce(new Error('boom'));
+
+      await component.remove('u2');
+      fixture.detectChanges();
+
+      expect(component.rowError()).toBe('adminUsers.deleteError');
+    });
+
+    /**
+     * Se rétrograder ou se supprimer soi-même peut priver l'organisation de son dernier
+     * administrateur, sans qu'aucun écran ne le dise. Le serveur l'accepterait ; on ne le propose
+     * pas, et on refuse même si la méthode est appelée directement.
+     */
+    it('offers no action on your own row', () => {
+      setup('owner');
+      userService.users.set([user('owner', { id: 'u1' })]);
+      fixture.detectChanges();
+
+      expect(rows()[0].querySelector('[data-testid="self-row"]')).not.toBeNull();
+      expect(rows()[0].querySelector('[data-testid="edit-role"]')).toBeNull();
+      expect(rows()[0].querySelector('[data-testid="delete-user"]')).toBeNull();
+    });
+
+    it('refuses a forced self-demotion or self-deletion', async () => {
+      setup('owner');
+      userService.users.set([user('owner', { id: 'u1' })]);
+      fixture.detectChanges();
+
+      await component.changeRole('u1', 'viewer');
+      await component.remove('u1');
+
+      expect(userService.updateUser).not.toHaveBeenCalled();
+      expect(userService.deleteUser).not.toHaveBeenCalled();
     });
   });
 

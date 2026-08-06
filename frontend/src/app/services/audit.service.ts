@@ -24,7 +24,7 @@ export class AuditService {
       this.entries.set(data ?? []);
       this.error.set(null);
     } catch (err) {
-      this.error.set('Failed to load audit log');
+      this.error.set('errors.loadAuditLog');
     } finally {
       this.isLoading.set(false);
     }

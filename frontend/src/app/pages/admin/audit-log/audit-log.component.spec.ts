@@ -95,10 +95,10 @@ describe('AuditLogComponent', () => {
 
     it('renders the service error message', () => {
       setup();
-      auditService.error.set('Failed to load audit log');
+      auditService.error.set('errors.loadAuditLog');
       fixture.detectChanges();
 
-      expect(el('audit-error')!.textContent).toContain('Failed to load audit log');
+      expect(el('audit-error')!.textContent).toContain('errors.loadAuditLog');
     });
 
     it('renders one row per entry with action, actor and resource', () => {
@@ -151,24 +151,33 @@ describe('AuditLogComponent', () => {
 
   describe('role gating', () => {
     /**
-     * MANQUE CONSTATÉ : la page ne pose aucune barriere de role. Le journal d'audit — qui expose
-     * qui a fait quoi sur toute l'organisation — est rendu a l'identique pour un owner et pour un
-     * viewer, et la route `admin/audit-log` ne pose que `authGuard`. Seul le serveur protege la
-     * route : un role insuffisant recolte un 403 affiche comme une erreur de chargement, au lieu
-     * de ne pas se voir proposer la page.
-     * Ces tests epinglent le comportement ACTUEL ; ils devront etre inverses une fois la barriere
-     * ajoutee.
+     * Le serveur exige `maintainer` sur GET /api/organizations/{orgId}/audit-log. La page était
+     * rendue à l'identique aux quatre rôles : un developer ou un viewer déclenchait un appel voué
+     * au 403, affiché comme une erreur de chargement générique — « ça n'a pas marché » là où la
+     * vraie réponse est « ce n'est pas pour vous ».
      */
-    it.each<UserRole>(['owner', 'maintainer', 'developer', 'viewer'])(
-      'renders the same log to a %s (missing role gate)',
+    it.each<UserRole>(['owner', 'maintainer'])('renders the log to a %s', (role) => {
+      setup(role);
+      auditService.entries.set([auditEntry({ action: 'user.role_changed', actorUserId: 'u9' })]);
+      fixture.detectChanges();
+
+      expect(auditService.listAuditLog).toHaveBeenCalledWith('o1');
+      expect(rows().length).toBe(1);
+      expect(rows()[0].textContent).toContain('user.role_changed');
+      expect(el('audit-forbidden')).toBeNull();
+    });
+
+    it.each<UserRole>(['developer', 'viewer'])(
+      'tells a %s the log is not theirs, and never asks the server for it',
       (role) => {
         setup(role);
-        auditService.entries.set([auditEntry({ action: 'user.role_changed', actorUserId: 'u9' })]);
+        auditService.entries.set([auditEntry({ action: 'user.role_changed' })]);
         fixture.detectChanges();
 
-        expect(auditService.listAuditLog).toHaveBeenCalledWith('o1');
-        expect(rows().length).toBe(1);
-        expect(rows()[0].textContent).toContain('user.role_changed');
+        // Ne pas demander ce qu'on n'a pas le droit de lire : le 403 n'apprend rien à personne.
+        expect(auditService.listAuditLog).not.toHaveBeenCalled();
+        expect(el('audit-forbidden')).not.toBeNull();
+        expect(rows().length).toBe(0);
       },
     );
 

@@ -43,6 +43,10 @@ export class ProjectsListComponent implements OnInit {
   }
 
   async submit(): Promise<void> {
+    // Revérifié hors du gabarit : le `@if` masque le bouton, il n'empêche pas d'appeler la
+    // méthode. Le serveur reste l'autorité — c'est de la défense en profondeur.
+    if (!this.canCreate()) return;
+
     if (this.form.invalid) {
       this.form.markAllAsTouched();
       return;

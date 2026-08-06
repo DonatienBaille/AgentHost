@@ -126,12 +126,12 @@ describe('AgentsListComponent', () => {
 
     it('renders the error signal of the service', () => {
       setup();
-      agentService.error.set('Failed to load agents');
+      agentService.error.set('errors.loadAgents');
       fixture.detectChanges();
 
       const banner = el('agents-error');
       expect(banner).not.toBeNull();
-      expect(banner!.textContent).toContain('Failed to load agents');
+      expect(banner!.textContent).toContain('errors.loadAgents');
     });
 
     it('renders one card per agent with the displayed fields and its link', () => {

@@ -21,7 +21,7 @@ export class ArtifactService {
       this.artifacts.set(data ?? []);
       this.error.set(null);
     } catch (err) {
-      this.error.set('Failed to load artifacts');
+      this.error.set('errors.loadArtifacts');
     } finally {
       this.isLoading.set(false);
     }

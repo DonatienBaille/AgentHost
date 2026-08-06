@@ -37,7 +37,7 @@ export class MemoryService {
       this.memory.set(memory);
       this.error.set(null);
     } catch (err) {
-      this.error.set(`Failed to load memory for project ${projectId}`);
+      this.error.set('errors.loadMemory');
     } finally {
       this.isLoading.set(false);
     }
@@ -99,7 +99,7 @@ export class MemoryService {
           })
           // Without this the failed refetch is an unhandled rejection: the UI would keep showing
           // the pre-update snapshot with no indication that it is now stale.
-          .catch(() => this.error.set(`Failed to load memory for project ${projectId}`));
+          .catch(() => this.error.set('errors.loadMemory'));
       }),
     );
   }

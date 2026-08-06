@@ -3,23 +3,31 @@
 <div class="p-6 max-w-5xl mx-auto">
   <div class="flex items-center justify-between mb-8">
     <h1 class="text-3xl font-bold">{{ 'adminUsers.title' | translate }}</h1>
-    <button
-      type="button"
-      data-testid="new-user"
-      class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
-      (click)="toggleForm()"
-    >
-      {{ (showForm() ? 'common.cancel' : 'adminUsers.newUser') | translate }}
-    </button>
+    @if (canManage()) {
+      <button
+        type="button"
+        data-testid="new-user"
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
+        (click)="toggleForm()"
+      >
+        {{ (showForm() ? 'common.cancel' : 'adminUsers.newUser') | translate }}
+      </button>
+    }
   </div>
 
   @if (error()) {
     <div data-testid="users-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
-      <p class="text-red-200">{{ error() }}</p>
+      <p class="text-red-200">{{ error()! | translate }}</p>
     </div>
   }
 
-  @if (showForm()) {
+  @if (rowError()) {
+    <div data-testid="users-row-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+      <p class="text-red-200">{{ rowError()! | translate }}</p>
+    </div>
+  }
+
+  @if (showForm() && canManage()) {
     <form [formGroup]="form" (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
       @if (submitError()) {
         <div class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
@@ -72,6 +80,9 @@
           <th class="px-4 py-2">{{ 'adminUsers.displayName' | translate }}</th>
           <th class="px-4 py-2">{{ 'adminUsers.role' | translate }}</th>
           <th class="px-4 py-2">{{ 'adminUsers.createdAt' | translate }}</th>
+          @if (canManage()) {
+            <th class="px-4 py-2 text-right">{{ 'adminUsers.actions' | translate }}</th>
+          }
         </tr>
       </thead>
       <tbody>
@@ -79,8 +90,55 @@
           <tr data-testid="user-row" class="border-b border-gray-700 last:border-0">
             <td class="px-4 py-2">{{ user.email }}</td>
             <td class="px-4 py-2">{{ user.displayName || '—' }}</td>
-            <td class="px-4 py-2">{{ 'roles.' + user.role | translate }}</td>
+            <td class="px-4 py-2">
+              @if (editingUserId() === user.id) {
+                <select
+                  data-testid="role-select"
+                  class="px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm"
+                  [disabled]="busyUserId() === user.id"
+                  (change)="changeRole(user.id, $any($event.target).value)"
+                >
+                  @for (role of roles; track role) {
+                    <option [value]="role" [selected]="role === user.role">
+                      {{ 'roles.' + role | translate }}
+                    </option>
+                  }
+                </select>
+              } @else {
+                {{ 'roles.' + user.role | translate }}
+              }
+            </td>
             <td class="px-4 py-2 text-gray-500">{{ user.createdAt | date: 'short' }}</td>
+            @if (canManage()) {
+              <td class="px-4 py-2 text-right whitespace-nowrap">
+                @if (user.id === currentUserId()) {
+                  <!-- Se rétrograder ou se supprimer soi-même peut priver l'organisation de son
+                       dernier administrateur. Le serveur l'accepterait ; on ne le propose pas. -->
+                  <span data-testid="self-row" class="text-xs text-gray-500">
+                    {{ 'adminUsers.itsYou' | translate }}
+                  </span>
+                } @else {
+                  <button
+                    type="button"
+                    data-testid="edit-role"
+                    class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 transition mr-2"
+                    [disabled]="busyUserId() === user.id"
+                    (click)="toggleRoleEditor(user.id)"
+                  >
+                    {{ (editingUserId() === user.id ? 'common.cancel' : 'adminUsers.changeRole') | translate }}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="delete-user"
+                    class="px-2 py-1 rounded text-xs bg-red-800 hover:bg-red-700 transition"
+                    [disabled]="busyUserId() === user.id"
+                    (click)="remove(user.id)"
+                  >
+                    {{ 'common.delete' | translate }}
+                  </button>
+                }
+              </td>
+            }
           </tr>
         }
       </tbody>

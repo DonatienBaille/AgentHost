@@ -144,7 +144,7 @@ describe('ProjectMemoryComponent', () => {
       fixture.detectChanges();
       await settle();
 
-      expect(el('memory-error')!.textContent).toContain('Failed to load memory for project p1');
+      expect(el('memory-error')!.textContent).toContain('errors.loadMemory');
       expect(el('memory-context')).toBeNull();
       // L'échec REST n'empêche pas de rejoindre le groupe : les pushs suivants peuvent réparer.
       expect(signalR.joinProjectMemory).toHaveBeenCalledWith('p1');
@@ -301,7 +301,7 @@ describe('ProjectMemoryComponent', () => {
       signalR.onMemoryUpdated$.next({});
       await settle();
 
-      expect(el('memory-error')!.textContent).toContain('Failed to load memory for project p1');
+      expect(el('memory-error')!.textContent).toContain('errors.loadMemory');
       expect(el('memory-context')).not.toBeNull();
     });
 

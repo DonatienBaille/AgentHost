@@ -98,12 +98,12 @@ describe('ProjectsListComponent', () => {
 
     it('renders the error signal of the service', () => {
       setup();
-      projectService.error.set('Failed to load projects');
+      projectService.error.set('errors.loadProjects');
       fixture.detectChanges();
 
       const banner = el('projects-error');
       expect(banner).not.toBeNull();
-      expect(banner!.textContent).toContain('Failed to load projects');
+      expect(banner!.textContent).toContain('errors.loadProjects');
     });
 
     it('renders one card per project with the displayed fields and its link', () => {
@@ -138,7 +138,7 @@ describe('ProjectsListComponent', () => {
     it('keeps the cards visible alongside an error banner', () => {
       setup();
       projectService.projects.set([project()]);
-      projectService.error.set('Failed to load projects');
+      projectService.error.set('errors.loadProjects');
       fixture.detectChanges();
 
       expect(all('project-card').length).toBe(1);
@@ -191,15 +191,15 @@ describe('ProjectsListComponent', () => {
       expect(el('project-form')).not.toBeNull();
     });
 
-    it('does not stop a viewer who forces submit — the server is the real gate', () => {
+    it('refuses a forced submit from a viewer', async () => {
       setup('viewer');
       fillForm();
 
-      // Comportement ACTUEL épinglé : `submit()` ne revérifie pas `canCreate()`, seul le
-      // masquage du bouton protège l'IHM (cf. rapport).
-      return component.submit().then(() => {
-        expect(projectService.createProject).toHaveBeenCalledTimes(1);
-      });
+      // Masquer le bouton n'empêche pas d'appeler la méthode. Le serveur reste l'autorité —
+      // cette garde est de la défense en profondeur.
+      await component.submit();
+
+      expect(projectService.createProject).not.toHaveBeenCalled();
     });
   });
 
