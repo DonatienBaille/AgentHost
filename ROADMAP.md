@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-289 tests backend, 28 tests frontend, build sans warning.
+293 tests backend, 558 tests frontend, 8 tests end-to-end Playwright, build sans warning.
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
 contient** concrètement, et **à quoi on reconnaît qu'il est fini**. L'ordre est un défaut
@@ -10,7 +10,49 @@ la priorité business le demande.
 
 ---
 
-## Lot 0 — Tests complets de l'IHM
+## Lot 0 — Tests complets de l'IHM ✅ terminé
+
+**Livré.** 28 → 558 tests frontend, plus 8 tests end-to-end Playwright contre la vraie pile.
+Les 16 composants et pages ont un spec, tous les services sont couverts contre
+`provideHttpClientTesting`, les gardes et le routage aussi, et le temps réel est testé avec un hub
+simulé (événements de run, changements d'état, approbation qui arrive sur le fil, mémoire de
+projet). La CI exécute les tests de composants **et** Playwright dans un job `e2e` distinct.
+
+Deux réserves à connaître :
+
+- **Le parcours Playwright s'arrête au run lancé.** Approbation et téléchargement d'artefact
+  exigent qu'un agent tourne réellement, donc un runtime de conteneurs. Le test vérifie que le run
+  atteint un état *terminal* sans rechargement ; le chemin conteneur lui-même reste prouvé côté
+  backend par `ContainerLifecycleTests`, que la CI force à s'exécuter.
+- **La suite était non déterministe** (verte une fois sur deux) parce que
+  `@angular/build:unit-test` désactive l'isolation des modules par défaut, ce qui rend `vi.mock()`
+  dépendant de l'ordre de chargement. Corrigé par `frontend/vitest.config.ts` ; la suite passe de
+  ~3 s à ~23 s. À garder en tête si quelqu'un est tenté de retirer ce fichier.
+
+**Défauts d'IHM découverts pendant l'écriture des tests** — tous épinglés par un test qui constate
+le comportement actuel, avec un commentaire l'expliquant, pour que les corriger soit une décision
+explicite. À traiter au fil de l'eau :
+
+1. Un agent introuvable rend une page **vide** : `agent.service.ts:57-60` avale le 404 et retourne
+   `null`, donc le `catch` de `agent-detail.component.ts:54-64` ne s'exécute jamais et son bloc
+   d'erreur dédié ne s'affiche pas. Seule reste une bulle générique en bas à droite.
+2. Les pages **utilisateurs**, **webhooks** et **journal d'audit** n'ont aucune barrière de rôle
+   côté IHM, alors que le serveur exige `maintainer` sur ces routes. Ce ne sont donc pas des
+   failles — mais un `viewer` remplit un formulaire pour récolter un 403.
+   `users.component.ts:20` injecte `AuthService` sans jamais s'en servir : la barrière était prévue.
+3. Messages d'erreur **anglais codés en dur** rendus non traduits dans une application en français
+   par défaut (`user.service.ts:25`, `organization.service.ts:24`, `webhook.service.ts:26`,
+   `audit.service.ts:27`). `SecretService` fait correctement l'inverse.
+4. `dashboard.component.ts:38` — comparateur de tri qui ne retourne jamais 0 : ordre indéfini pour
+   deux runs de même horodatage.
+5. Le tableau de bord n'affiche que `runService.error` : un échec de chargement des projets est
+   indiscernable d'une organisation sans projet.
+6. `submit()` / `publish()` (projets, agents) ne revérifient pas le rôle hors du `@if` du gabarit.
+7. La page utilisateurs n'offre **aucune action par ligne** : ni changement de rôle ni suppression,
+   alors que l'API le permet.
+
+<details>
+<summary>Énoncé initial du lot</summary>
 
 **Pourquoi en premier.** Le frontend compte 28 tests, presque tous concentrés sur l'intercepteur
 d'authentification. Tout le reste — pages, formulaires, gardes de routes, temps réel — n'a aucune
@@ -42,6 +84,8 @@ en CI aujourd'hui. Le backend a 289 tests ; le déséquilibre est le risque prin
 **Fini quand.** Couverture significative sur toutes les pages et tous les services ; au moins un
 parcours Playwright complet vert en CI ; le job frontend casse quand on retire un champ d'un
 contrat.
+
+</details>
 
 ---
 
