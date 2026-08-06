@@ -5,6 +5,7 @@
     <h1 class="text-3xl font-bold">{{ pageTitle() | translate }}</h1>
     @if (canCreate() && projectId()) {
       <button
+        data-testid="new-agent"
         type="button"
         class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
         (click)="toggleForm()"
@@ -15,15 +16,15 @@
   </div>
 
   @if (error()) {
-    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+    <div data-testid="agents-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
       <p class="text-red-200">{{ error() }}</p>
     </div>
   }
 
   @if (showForm()) {
-    <form [formGroup]="form" (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
+    <form data-testid="agent-form" [formGroup]="form" (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
       @if (submitError()) {
-        <div class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
+        <div data-testid="agent-submit-error" class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
           {{ submitError() | translate }}
         </div>
       }
@@ -69,17 +70,18 @@
   <div class="grid gap-4 sm:grid-cols-2">
     @for (agent of agents(); track agent.id) {
       <a
+        data-testid="agent-card"
         [routerLink]="['/agents', agent.id]"
         class="block bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-blue-500 transition"
       >
         <div class="flex items-center justify-between">
           <div class="font-medium">{{ agent.name }}</div>
           @if (agent.isPublished) {
-            <span class="px-2 py-0.5 rounded text-xs bg-green-900/60 text-green-300 border border-green-700">
+            <span data-testid="agent-published" class="px-2 py-0.5 rounded text-xs bg-green-900/60 text-green-300 border border-green-700">
               {{ 'agentsList.published' | translate }}
             </span>
           } @else {
-            <span class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 border border-gray-600">
+            <span data-testid="agent-draft" class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300 border border-gray-600">
               {{ 'agentsList.draft' | translate }}
             </span>
           }
@@ -90,7 +92,7 @@
     }
 
     @if (!isLoading() && agents().length === 0) {
-      <p class="text-gray-500 text-sm">{{ 'agentsList.empty' | translate }}</p>
+      <p data-testid="agents-empty" class="text-gray-500 text-sm">{{ 'agentsList.empty' | translate }}</p>
     }
   </div>
 </div>

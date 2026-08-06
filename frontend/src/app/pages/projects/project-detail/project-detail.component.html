@@ -8,7 +8,7 @@
   }
 
   @if (error()) {
-    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+    <div data-testid="project-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
       <p class="text-red-200">{{ error() }}</p>
     </div>
   }
@@ -16,25 +16,28 @@
   @if (project(); as proj) {
     <div class="mb-8 flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 class="text-3xl font-bold mb-2">{{ proj.name }}</h1>
+        <h1 data-testid="project-name" class="text-3xl font-bold mb-2">{{ proj.name }}</h1>
         @if (proj.description) {
-          <p class="text-gray-400">{{ proj.description }}</p>
+          <p data-testid="project-description" class="text-gray-400">{{ proj.description }}</p>
         }
       </div>
       <div class="flex items-center gap-2">
         <a
+          data-testid="link-agents"
           [routerLink]="['/projects', proj.id, 'agents']"
           class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded font-medium transition"
         >
           {{ 'projectDetail.agents' | translate }}
         </a>
         <a
+          data-testid="link-webhooks"
           [routerLink]="['/admin/webhooks', proj.id]"
           class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded font-medium transition"
         >
           {{ 'projectDetail.webhooks' | translate }}
         </a>
         <a
+          data-testid="link-new-run"
           [routerLink]="['/projects', proj.id, 'new-run']"
           class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
         >
@@ -51,6 +54,7 @@
           <div class="space-y-2">
             @for (run of recentRuns(); track run.id) {
               <a
+                data-testid="run-row"
                 [routerLink]="['/runs', run.id]"
                 class="flex items-center justify-between p-2 rounded hover:bg-gray-700 transition"
               >
@@ -68,7 +72,7 @@
             }
 
             @if (recentRuns().length === 0) {
-              <p class="text-gray-500 text-sm py-4">{{ 'projectDetail.noRuns' | translate }}</p>
+              <p data-testid="runs-empty" class="text-gray-500 text-sm py-4">{{ 'projectDetail.noRuns' | translate }}</p>
             }
           </div>
         </div>

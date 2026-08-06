@@ -5,6 +5,7 @@
     <h1 class="text-3xl font-bold">{{ 'projectsList.title' | translate }}</h1>
     @if (canCreate()) {
       <button
+        data-testid="new-project"
         type="button"
         class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
         (click)="toggleForm()"
@@ -15,15 +16,15 @@
   </div>
 
   @if (error()) {
-    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+    <div data-testid="projects-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
       <p class="text-red-200">{{ error() }}</p>
     </div>
   }
 
   @if (showForm()) {
-    <form [formGroup]="form" (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
+    <form data-testid="project-form" [formGroup]="form" (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
       @if (submitError()) {
-        <div class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
+        <div data-testid="project-submit-error" class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
           {{ submitError() | translate }}
         </div>
       }
@@ -64,6 +65,7 @@
   <div class="grid gap-4 sm:grid-cols-2">
     @for (project of projects(); track project.id) {
       <a
+        data-testid="project-card"
         [routerLink]="['/projects', project.id]"
         class="block bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-blue-500 transition"
       >
@@ -76,7 +78,7 @@
     }
 
     @if (!isLoading() && projects().length === 0) {
-      <p class="text-gray-500 text-sm">{{ 'projectsList.empty' | translate }}</p>
+      <p data-testid="projects-empty" class="text-gray-500 text-sm">{{ 'projectsList.empty' | translate }}</p>
     }
   </div>
 </div>
