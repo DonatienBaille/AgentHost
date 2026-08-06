@@ -127,11 +127,13 @@ uid. C'est une propriété des user namespaces rootless, pas quelque chose qu'Ag
   varié selon les moteurs et les versions ; un Podman ancien qui refuse cette forme se règle sans
   toucher au code.
 
-**Non vérifié ici** : aucun runtime de conteneurs n'est joignable dans l'environnement de
-développement de ce dépôt. Le mapping de chemins, la détection de socket et la conversion NanoCPUs
-sont couverts par des tests unitaires ; l'acceptation effective de `no-new-privileges=true`, de
-`CapDrop: ALL` et des suffixes `:z`/`:U` par une version donnée de Podman n'a **pas** pu être
-observée sur un démon réel.
+**Ce qui est vérifié, et sur quel moteur** : aucun runtime de conteneurs n'est joignable dans
+l'environnement de développement de ce dépôt, mais la CI (`ubuntu-latest`) en a un.
+`ContainerLifecycleTests` y lance un vrai conteneur et **observe sur le démon** l'acceptation de
+`no-new-privileges=true`, de `CapDrop: ALL`, du rootfs en lecture seule et de `NanoCPUs` — voir
+« Couverture : ce qui est exécuté » plus bas. Restent **non observés sur un démon réel** : Podman
+(la CI utilise Docker ; le code ne branche sur aucun des deux, mais l'acceptation des mêmes options
+par une version donnée de Podman reste un raisonnement) et les suffixes de montage `:z`/`:U`.
 
 ## Chemins de bind mount (backend conteneurisé)
 
@@ -218,6 +220,47 @@ dotnet test
 dotnet run --project src/AgentHost.Api
 ```
 
+`dotnet test` a besoin du PostgreSQL local (les tests d'intégration démarrent le vrai pipeline
+`Program`). Sans démon de conteneurs, les tests de `ContainerLifecycleTests` se déclarent
+**SKIPPED** avec la raison et le socket sondé — jamais « passés ». Avec un démon joignable
+(`docker version` répond), ils s'exécutent : comptez ~20 s de plus, un pull d'`alpine:3.20` et une
+image locale `localhost:5000/agenthost-e2e-agent:*` supprimée en fin de test.
+
+## Couverture : ce qui est exécuté, ce qui est raisonné
+
+Le chemin cœur du produit — lancer un agent dans un conteneur — a longtemps été le moins testé :
+tous les tests de cycle de vie de run écrivaient en base l'état qu'un conteneur *aurait* produit
+(c'est toujours le cas de `ParkRunAsRunningAsync`, et c'est utile : cela couvre le protocole
+indépendamment d'un runtime). Un bug d'encodage a pu, dans ce dépôt, faire renvoyer un dictionnaire
+de secrets vide pendant toute la vie du projet sans qu'aucun test ne le remarque.
+
+`backend/tests/AgentHost.Api.Tests/Integration/ContainerLifecycleTests.cs` exécute désormais ce
+chemin pour de bon, une fois, contre un vrai démon (en CI sur `ubuntu-latest` ; localement dès qu'un
+démon répond). L'agent est `alpine` plus un script shell, construit à la volée via l'endpoint
+`/build` du démon — aucune image de fixture dans le dépôt, aucun registre. Le conteneur joint l'API
+par la **gateway du bridge Docker**, lue sur le démon et non codée en dur, l'application étant
+servie en plus sur Kestrel (un `TestServer` n'a aucun socket à composer).
+
+**Réellement exécuté et vérifié** :
+
+| Étape | Vérification |
+| --- | --- |
+| Création du conteneur | Flags §13.2 tels que le démon les a enregistrés : `ReadonlyRootfs`, `CapDrop: ALL`, `CapAdd: NET_BIND_SERVICE`, `SecurityOpt`, tmpfs `/tmp`, `NetworkMode` |
+| Limites du manifeste | `NanoCPUs` et `Memory`/`MemorySwap` (sans swap) comparés au profil résolu du run |
+| Livraison des secrets | Le conteneur lit `/run/secrets/<NOM>` et compare la valeur, octet pour octet, à celle stockée par `POST /api/secrets` |
+| Secrets hors environnement | Aucune variable `SECRET_*` — vérifié dans le conteneur *et* dans la config vue par `docker inspect` |
+| Protocole agent | `POST /api/agent/runs/{id}/events` avec `AGENTHOST_RUN_TOKEN`, **depuis le conteneur**, relu par un humain via `GET /api/runs/{id}/events` |
+| `/workspace` | Bind mount inscriptible : le fichier écrit par l'agent est relu sur l'hôte |
+| Fin de run | Sortie 0 → `succeeded`, `exit_code`, `started_at`/`finished_at` |
+| Nettoyage | Conteneur supprimé, **répertoire de secrets en clair effacé** (garantie de sécurité, jamais vérifiée jusqu'ici) |
+
+**Non exécuté, raisonné seulement** : Podman (la CI n'a que Docker), les suffixes de montage
+`:z`/`:U`, `Docker:HostWorkspacePath` avec un démon distant, l'égress `allowlist` via proxy (voir
+plus bas), et la collecte de logs conteneur au-delà du fait qu'elle ne fait pas échouer le run.
+
+La CI échoue si ces tests se contentent de *skipper* : un test sauté se présente comme un succès, ce
+qui est exactement l'illusion que cette suite existe pour supprimer.
+
 ## Développement frontend
 
 ```bash
@@ -250,6 +293,11 @@ spec:
 Le répertoire est supprimé dès la sortie du conteneur ; un balayage périodique
 (`Retention:SecretsGraceMinutes`) nettoie ceux qu'un crash aurait laissés. Voir
 `docs/agent-protocol.md`.
+
+Ces trois propriétés — flags de durcissement acceptés par le démon, secret lisible dans le
+conteneur au bon contenu et absent de son environnement, répertoire en clair effacé après la sortie
+— ne sont pas seulement documentées : elles sont **assertées sur un vrai conteneur** par
+`ContainerLifecycleTests` (voir « Couverture : ce qui est exécuté »).
 
 **Rétention** : `Retention:WorkspaceHours` (7 j par défaut) purge les workspaces ;
 `Retention:ArtifactDays` est désactivé par défaut, car les lignes `artifacts` en base référencent
