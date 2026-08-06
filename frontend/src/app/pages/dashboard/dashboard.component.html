@@ -7,7 +7,7 @@
   </div>
 
   @if (error()) {
-    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+    <div data-testid="dashboard-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
       <p class="text-red-200">{{ error() }}</p>
     </div>
   }
@@ -16,19 +16,19 @@
   <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
       <div class="text-sm text-gray-400">{{ 'dashboard.totalRuns' | translate }}</div>
-      <div class="text-3xl font-bold mt-1">{{ runCount() }}</div>
+      <div data-testid="stat-total-runs" class="text-3xl font-bold mt-1">{{ runCount() }}</div>
     </div>
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
       <div class="text-sm text-gray-400">{{ 'dashboard.successRate' | translate }}</div>
-      <div class="text-3xl font-bold mt-1 text-green-400">{{ successRate() | number: '1.0-0' }}%</div>
+      <div data-testid="stat-success-rate" class="text-3xl font-bold mt-1 text-green-400">{{ successRate() | number: '1.0-0' }}%</div>
     </div>
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
       <div class="text-sm text-gray-400">{{ 'dashboard.active' | translate }}</div>
-      <div class="text-3xl font-bold mt-1 text-yellow-400">{{ activeRuns() }}</div>
+      <div data-testid="stat-active-runs" class="text-3xl font-bold mt-1 text-yellow-400">{{ activeRuns() }}</div>
     </div>
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
       <div class="text-sm text-gray-400">{{ 'dashboard.failed' | translate }}</div>
-      <div class="text-3xl font-bold mt-1 text-red-400">{{ failedRuns() }}</div>
+      <div data-testid="stat-failed-runs" class="text-3xl font-bold mt-1 text-red-400">{{ failedRuns() }}</div>
     </div>
   </div>
 
@@ -51,6 +51,7 @@
       <div class="space-y-3">
         @for (run of recentRuns(); track run.id) {
           <a
+            data-testid="run-card"
             [routerLink]="['/runs', run.id]"
             class="flex items-center justify-between bg-gray-800 border border-gray-700 rounded-lg p-3 hover:border-blue-500 transition"
           >
@@ -68,7 +69,7 @@
         }
 
         @if (!isLoading() && recentRuns().length === 0) {
-          <p class="text-gray-500 text-sm py-4">{{ 'dashboard.noRuns' | translate }}</p>
+          <p data-testid="runs-empty" class="text-gray-500 text-sm py-4">{{ 'dashboard.noRuns' | translate }}</p>
         }
       </div>
     </div>
@@ -79,6 +80,7 @@
       <div class="space-y-2">
         @for (project of projects(); track project.id) {
           <a
+            data-testid="project-card"
             [routerLink]="['/projects', project.id]"
             class="block bg-gray-800 border border-gray-700 rounded-lg p-3 hover:border-blue-500 transition"
           >
@@ -90,7 +92,7 @@
         }
 
         @if (projects().length === 0) {
-          <p class="text-gray-500 text-sm">{{ 'dashboard.noProjects' | translate }}</p>
+          <p data-testid="projects-empty" class="text-gray-500 text-sm">{{ 'dashboard.noProjects' | translate }}</p>
         }
       </div>
     </div>
