@@ -12,7 +12,11 @@ import {
   AgentVersion,
   Approval,
   AuditLogEntry,
+  ManifestValidationError,
+  ManifestValidationFailure,
+  ManifestValidationSuccess,
   Organization,
+  ParsedManifest,
   Project,
   ProjectMemory,
   Run,
@@ -23,6 +27,7 @@ import {
   UserRole,
   Webhook,
 } from '../models';
+import { JsonObject, JsonValue } from '../manifest';
 
 const T0 = '2026-01-01T00:00:00Z';
 
@@ -240,5 +245,180 @@ export function auditEntry(overrides: Partial<AuditLogEntry> = {}): AuditLogEntr
     details: null,
     createdAt: T0,
     ...overrides,
+  };
+}
+
+/**
+ * Rejoue côté test ce que fait `POST /api/agents/validate-manifest` sur un document déjà projeté
+ * en JSON, sans serveur.
+ *
+ * Deux comportements du backend sont reproduits ici, et un seul est anodin :
+ *  - les défauts du parseur (`displayName` retombe sur `name`, `cpu` vaut 2, `budget` 5/10, ...) ;
+ *  - l'écrasement en chaîne de tout scalaire des arbres libres `spec.inputs` / `spec.outputs`,
+ *    parce que le parseur les désérialise en `object`. C'est précisément la perte que le document
+ *    brut évite, et la reproduire ici garantit que le convertisseur ne s'appuie jamais dessus.
+ *
+ * Ces deux comportements sont vérifiés contre le vrai parseur par
+ * `backend/tests/.../ManifestValidationEndpointTests` et
+ * `CanonicalManifestContractTests`, sur le même manifeste que `nonTrivialManifestDocument()`.
+ */
+export function manifestValidation(document: JsonObject): ManifestValidationSuccess {
+  const metadata = (document['metadata'] ?? {}) as JsonObject;
+  const spec = (document['spec'] ?? {}) as JsonObject;
+  const permissions = (spec['permissions'] ?? {}) as JsonObject;
+  const runtime = (spec['runtime'] ?? {}) as JsonObject;
+  const budget = (spec['budget'] ?? {}) as JsonObject;
+  const external = spec['external'] as JsonObject | undefined;
+  const approvals = spec['approvals'] as JsonObject | undefined;
+  const beforeWrite = approvals?.['beforeWrite'] as JsonObject | undefined;
+  const name = (metadata['name'] as string | undefined) ?? '';
+
+  return {
+    valid: true,
+    manifest: {
+      apiVersion: (document['apiVersion'] as string | undefined) ?? 'agenthost.dev/v1',
+      kind: (document['kind'] as string | undefined) ?? 'Agent',
+      metadata: {
+        name,
+        displayName: (metadata['displayName'] as string | undefined) ?? name,
+        description: (metadata['description'] as string | undefined) ?? '',
+      },
+      spec: {
+        type: ((spec['type'] as string | undefined) ?? 'oci') as ParsedManifest['spec']['type'],
+        image: (spec['image'] as string | undefined) ?? null,
+        external: external
+          ? {
+              provider: (external['provider'] as string | undefined) ?? '',
+              model: (external['model'] as string | undefined) ?? null,
+              config: Object.fromEntries(
+                Object.entries((external['config'] ?? {}) as JsonObject).map(([k, v]) => [
+                  k,
+                  String(v),
+                ]),
+              ),
+            }
+          : null,
+        inputs: (stringifyScalars(spec['inputs'] ?? {}) ?? {}) as Record<string, unknown>,
+        outputs:
+          spec['outputs'] === undefined
+            ? null
+            : (stringifyScalars(spec['outputs']) as Record<string, unknown>),
+        permissions: {
+          vcs: (permissions['vcs'] as string | undefined) ?? 'none',
+          network: (permissions['network'] as string | undefined) ?? 'none',
+          secrets: (permissions['secrets'] as string[] | undefined) ?? [],
+          docker: (permissions['docker'] as boolean | undefined) ?? false,
+        },
+        runtime: {
+          profile: (runtime['profile'] as string | undefined) ?? 'standard',
+          cpu: (runtime['cpu'] as number | undefined) ?? 2,
+          memory: (runtime['memory'] as string | undefined) ?? '2Gi',
+          disk: (runtime['disk'] as string | undefined) ?? '10Gi',
+          maxDurationSeconds: (runtime['maxDurationSeconds'] as number | undefined) ?? 3600,
+        },
+        budget: {
+          defaultMaxUsd: (budget['defaultMaxUsd'] as number | undefined) ?? 5,
+          hardMaxUsd: (budget['hardMaxUsd'] as number | undefined) ?? 10,
+        },
+        approvals: beforeWrite
+          ? {
+              beforeWrite: {
+                requiredRole: (beforeWrite['requiredRole'] as string | undefined) ?? 'maintainer',
+                requiredCount: (beforeWrite['requiredCount'] as number | undefined) ?? 1,
+              },
+            }
+          : null,
+      },
+    },
+    permissionExtensions: {
+      networkAllowlist: (permissions['networkAllowlist'] as string[] | undefined) ?? [],
+      writableRootfs: (permissions['writableRootfs'] as boolean | undefined) ?? false,
+    },
+    document,
+    error: null,
+  };
+}
+
+export function manifestValidationFailure(
+  overrides: Partial<ManifestValidationError> = {},
+): ManifestValidationFailure {
+  return {
+    valid: false,
+    manifest: null,
+    permissionExtensions: null,
+    document: null,
+    error: { message: 'Failed to parse agent manifest YAML', line: 4, column: 3, ...overrides },
+  };
+}
+
+function stringifyScalars(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(stringifyScalars);
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, stringifyScalars(v)]));
+  }
+  return value === null ? '' : String(value);
+}
+
+/**
+ * Un manifeste non trivial : entrées à plusieurs champs et plusieurs types, sortie, allowlist
+ * réseau, secrets, rootfs inscriptible, fournisseur externe avec configuration, porte
+ * d'approbation. C'est le sujet du test d'aller-retour.
+ */
+export function nonTrivialManifestDocument(): JsonObject {
+  return {
+    apiVersion: 'agenthost.dev/v1',
+    kind: 'Agent',
+    metadata: {
+      name: 'redacteur',
+      displayName: 'Rédacteur de release notes',
+      description: 'Rédige les notes de version à partir des commits',
+    },
+    spec: {
+      type: 'claude_code',
+      image: 'ghcr.io/acme/redacteur:1.4.0',
+      external: {
+        provider: 'claude_code',
+        model: 'claude-opus-4',
+        config: { temperature: '0.2', maxTurns: '8' },
+      },
+      inputs: {
+        type: 'object',
+        properties: {
+          repository: {
+            type: 'string',
+            title: 'Dépôt',
+            description: 'Dépôt à analyser',
+          },
+          sinceTag: { type: 'string', description: 'Tag de départ', default: 'v1.0.0' },
+          maxCommits: { type: 'integer', description: 'Nombre de commits max', default: 200 },
+          temperature: { type: 'number', default: 0.2 },
+          draft: { type: 'boolean', description: 'Publier en brouillon', default: true },
+          tone: { type: 'string', description: 'Ton', enum: ['neutre', 'commercial'], default: 'neutre' },
+        },
+        required: ['repository', 'sinceTag'],
+      },
+      outputs: {
+        type: 'object',
+        properties: { markdown: { type: 'string', description: 'Notes rédigées' } },
+        required: ['markdown'],
+      },
+      permissions: {
+        vcs: 'write_pr',
+        network: 'allowlist',
+        networkAllowlist: ['api.github.com', 'registry.npmjs.org'],
+        secrets: ['GITHUB_TOKEN', 'ANTHROPIC_API_KEY'],
+        docker: true,
+        writableRootfs: true,
+      },
+      runtime: {
+        profile: 'large',
+        cpu: 4,
+        memory: '8Gi',
+        disk: '20Gi',
+        maxDurationSeconds: 1800,
+      },
+      budget: { defaultMaxUsd: 2.5, hardMaxUsd: 7.5 },
+      approvals: { beforeWrite: { requiredRole: 'maintainer', requiredCount: 2 } },
+    },
   };
 }
