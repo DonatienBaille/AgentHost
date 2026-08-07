@@ -196,4 +196,28 @@ describe('AgentService', () => {
       expect(service.versions().map((v) => v.id)).toEqual(['v2', 'v1']);
     });
   });
+
+  describe('validateManifest', () => {
+    it('posts the manifest to the dry-run route and returns the verdict', async () => {
+      const pending = service.validateManifest('metadata:\n  name: x\n');
+
+      const req = httpMock.expectOne(`${URL}/validate-manifest`);
+      expect(req.request.method).toBe('POST');
+      expect(req.request.body).toEqual({ manifestYaml: 'metadata:\n  name: x\n' });
+      req.flush({ valid: false, manifest: null, permissionExtensions: null, document: null,
+                  error: { message: 'boom', line: 2, column: 3 } });
+
+      const validation = await pending;
+      expect(validation.valid).toBe(false);
+      expect(validation.error?.line).toBe(2);
+    });
+
+    it('leaves the page-level error signal alone: an unfinished manifest is not a page error', async () => {
+      const pending = service.validateManifest('nope');
+      httpMock.expectOne(`${URL}/validate-manifest`).flush(null, { status: 500, statusText: 'Err' });
+
+      await expect(pending).rejects.toBeTruthy();
+      expect(service.error()).toBeNull();
+    });
+  });
 });

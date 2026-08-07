@@ -1,0 +1,466 @@
+<!-- src/app/components/manifest-editor/manifest-editor.component.html -->
+
+<div class="space-y-4">
+  <div class="flex items-center gap-2" role="tablist" [attr.aria-label]="'manifestEditor.modeLabel' | translate">
+    <button
+      data-testid="mode-form"
+      type="button"
+      role="tab"
+      [attr.aria-selected]="mode() === 'form'"
+      [class]="
+        mode() === 'form'
+          ? 'px-3 py-1.5 rounded text-sm font-medium bg-blue-600 text-white'
+          : 'px-3 py-1.5 rounded text-sm font-medium bg-gray-700 text-gray-300 hover:bg-gray-600'
+      "
+      (click)="setMode('form')"
+    >
+      {{ 'manifestEditor.modeForm' | translate }}
+    </button>
+    <button
+      data-testid="mode-yaml"
+      type="button"
+      role="tab"
+      [attr.aria-selected]="mode() === 'yaml'"
+      [class]="
+        mode() === 'yaml'
+          ? 'px-3 py-1.5 rounded text-sm font-medium bg-blue-600 text-white'
+          : 'px-3 py-1.5 rounded text-sm font-medium bg-gray-700 text-gray-300 hover:bg-gray-600'
+      "
+      (click)="setMode('yaml')"
+    >
+      {{ 'manifestEditor.modeYaml' | translate }}
+    </button>
+    <span class="text-xs text-gray-500">{{ 'manifestEditor.modeHint' | translate }}</span>
+  </div>
+
+  @if (switchBlocked()) {
+    <div data-testid="switch-blocked" role="alert" class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
+      {{ 'manifestEditor.switchBlocked' | translate }}
+    </div>
+  }
+
+  @if (unsupported().length > 0) {
+    <div
+      data-testid="unsupported-banner"
+      role="status"
+      class="bg-amber-900/40 border border-amber-700 rounded-lg p-3 text-sm text-amber-100"
+    >
+      <p class="font-medium">{{ 'manifestEditor.unsupportedTitle' | translate }}</p>
+      <p class="text-xs text-amber-200/80 mt-1">{{ 'manifestEditor.unsupportedIntro' | translate }}</p>
+      <ul class="mt-2 space-y-1">
+        @for (item of unsupported(); track item.path) {
+          <li data-testid="unsupported-item" class="text-xs">
+            <code class="font-mono text-amber-100">{{ item.path }}</code>
+            —
+            {{ 'manifestEditor.unsupported.' + item.reason | translate }}
+          </li>
+        }
+      </ul>
+    </div>
+  }
+
+  @if (mode() === 'yaml') {
+    <div>
+      <label class="block text-sm text-gray-400 mb-1" for="manifest-yaml">
+        {{ 'manifestEditor.yamlLabel' | translate }}
+      </label>
+      <p class="text-xs text-gray-500 mb-1">{{ 'manifestEditor.yamlHelp' | translate }}</p>
+      <textarea
+        id="manifest-yaml"
+        data-testid="manifest-yaml"
+        rows="18"
+        spellcheck="false"
+        class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+        [value]="yaml()"
+        (input)="onYamlInput($any($event.target).value)"
+      ></textarea>
+    </div>
+
+    @if (isValidating()) {
+      <p data-testid="validation-pending" class="text-xs text-gray-400">
+        {{ 'manifestEditor.validating' | translate }}
+      </p>
+    } @else if (validationUnavailable()) {
+      <p data-testid="validation-unavailable" class="text-xs text-gray-400">
+        {{ 'manifestEditor.validationUnavailable' | translate }}
+      </p>
+    } @else if (validationError()) {
+      <div data-testid="validation-error" role="alert" class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
+        @if (errorContext(); as context) {
+          <p class="font-medium">
+            {{ 'manifestEditor.errorAtLine' | translate: { line: context.line } }}
+          </p>
+          <pre data-testid="validation-error-line" class="mt-1 text-xs font-mono bg-black/40 rounded px-2 py-1 overflow-x-auto">{{ context.line }} | {{ context.text }}</pre>
+        } @else {
+          <p class="font-medium">{{ 'manifestEditor.errorNoLine' | translate }}</p>
+        }
+        <p data-testid="validation-error-message" class="mt-1 text-xs">{{ validationError()!.message }}</p>
+      </div>
+    } @else if (isValid()) {
+      <p data-testid="validation-ok" class="text-xs text-green-400">
+        {{ 'manifestEditor.valid' | translate }}
+      </p>
+    }
+  } @else {
+    <div data-testid="manifest-form" class="space-y-6">
+      <!-- Identité -->
+      <fieldset class="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
+        <legend class="px-2 text-sm font-medium text-gray-200">{{ 'manifestEditor.sectionIdentity' | translate }}</legend>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="mf-name">{{ 'manifestEditor.name' | translate }}</label>
+          <input id="mf-name" data-testid="mf-name" type="text" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                 [value]="model().name" (input)="patch({ name: $any($event.target).value })" />
+          <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.name' | translate }}</p>
+        </div>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="mf-display-name">{{ 'manifestEditor.displayName' | translate }}</label>
+          <input id="mf-display-name" data-testid="mf-display-name" type="text" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                 [value]="model().displayName" (input)="patch({ displayName: $any($event.target).value })" />
+          <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.displayName' | translate }}</p>
+        </div>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="mf-description">{{ 'manifestEditor.description' | translate }}</label>
+          <textarea id="mf-description" data-testid="mf-description" rows="2" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                    [value]="model().description" (input)="patch({ description: $any($event.target).value })"></textarea>
+          <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.description' | translate }}</p>
+        </div>
+      </fieldset>
+
+      <!-- Type et image -->
+      <fieldset class="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
+        <legend class="px-2 text-sm font-medium text-gray-200">{{ 'manifestEditor.sectionType' | translate }}</legend>
+
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-type">{{ 'manifestEditor.type' | translate }}</label>
+            <select id="mf-type" data-testid="mf-type" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                    [value]="model().type" (change)="setType($any($event.target).value)">
+              @for (option of agentTypes(); track option) {
+                <option [value]="option" [selected]="option === model().type">{{ option }}</option>
+              }
+            </select>
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.type' | translate }}</p>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-image">{{ 'manifestEditor.image' | translate }}</label>
+            <input id="mf-image" data-testid="mf-image" type="text" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                   [value]="model().image" (input)="patch({ image: $any($event.target).value })" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.image' | translate }}</p>
+          </div>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm text-gray-300">
+          <input data-testid="mf-external-enabled" type="checkbox" [checked]="model().externalEnabled"
+                 (change)="patch({ externalEnabled: $any($event.target).checked })" />
+          {{ 'manifestEditor.useExternal' | translate }}
+        </label>
+        <p class="text-xs text-gray-500">{{ 'manifestEditor.help.useExternal' | translate }}</p>
+
+        @if (model().externalEnabled) {
+          <div data-testid="mf-external" class="grid gap-3 sm:grid-cols-2 border-l-2 border-gray-700 pl-3">
+            <div>
+              <label class="block text-sm text-gray-400 mb-1" for="mf-provider">{{ 'manifestEditor.externalProvider' | translate }}</label>
+              <input id="mf-provider" data-testid="mf-provider" type="text" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                     [value]="model().externalProvider" (input)="patch({ externalProvider: $any($event.target).value })" />
+              <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.externalProvider' | translate }}</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-400 mb-1" for="mf-model">{{ 'manifestEditor.externalModel' | translate }}</label>
+              <input id="mf-model" data-testid="mf-model" type="text" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                     [value]="model().externalModel" (input)="patch({ externalModel: $any($event.target).value })" />
+              <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.externalModel' | translate }}</p>
+            </div>
+            <div class="sm:col-span-2">
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-gray-400">{{ 'manifestEditor.externalConfig' | translate }}</span>
+                <button data-testid="add-config" type="button" class="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded" (click)="addConfigEntry()">
+                  {{ 'manifestEditor.addEntry' | translate }}
+                </button>
+              </div>
+              <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.externalConfig' | translate }}</p>
+              @for (entry of model().externalConfig; track $index) {
+                <div data-testid="config-row" class="flex gap-2 mt-2">
+                  <input data-testid="config-key" type="text" class="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                         [value]="entry.key" (input)="patchConfigEntry($index, { key: $any($event.target).value })" />
+                  <input data-testid="config-value" type="text" class="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                         [value]="entry.value" (input)="patchConfigEntry($index, { value: $any($event.target).value })" />
+                  <button data-testid="remove-config" type="button" class="text-xs px-2 py-1 bg-red-900/60 hover:bg-red-800 rounded" (click)="removeConfigEntry($index)">
+                    {{ 'common.delete' | translate }}
+                  </button>
+                </div>
+              }
+            </div>
+          </div>
+        }
+      </fieldset>
+
+      <!-- Entrées -->
+      <fieldset class="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
+        <legend class="px-2 text-sm font-medium text-gray-200">{{ 'manifestEditor.sectionInputs' | translate }}</legend>
+        <p class="text-xs text-gray-500">{{ 'manifestEditor.help.inputs' | translate }}</p>
+
+        @if (!model().inputs.editable) {
+          <p data-testid="inputs-locked" class="text-xs text-amber-300">{{ 'manifestEditor.schemaLocked' | translate }}</p>
+        } @else {
+          @for (field of model().inputs.fields; track $index) {
+            <div data-testid="input-field" class="border border-gray-700 rounded p-3 space-y-2">
+              <div class="grid gap-2 sm:grid-cols-3">
+                <div>
+                  <label class="block text-xs text-gray-400 mb-1">{{ 'manifestEditor.fieldName' | translate }}</label>
+                  <input data-testid="field-name" type="text" class="w-full px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                         [value]="field.name" (input)="patchField('inputs', $index, { name: $any($event.target).value })" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-400 mb-1">{{ 'manifestEditor.fieldType' | translate }}</label>
+                  <select data-testid="field-type" class="w-full px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm"
+                          [value]="field.type" (change)="patchField('inputs', $index, { type: $any($event.target).value })">
+                    @for (option of fieldTypes; track option) {
+                      <option [value]="option" [selected]="option === field.type">{{ option }}</option>
+                    }
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-400 mb-1">{{ 'manifestEditor.fieldDefault' | translate }}</label>
+                  <input data-testid="field-default" type="text" class="w-full px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                         [value]="fieldDefaultText(field)" (input)="setFieldDefault('inputs', $index, $any($event.target).value)" />
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-400 mb-1">{{ 'manifestEditor.fieldDescription' | translate }}</label>
+                <input data-testid="field-description" type="text" class="w-full px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm"
+                       [value]="field.description" (input)="patchField('inputs', $index, { description: $any($event.target).value })" />
+                <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.fieldDescription' | translate }}</p>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-400 mb-1">{{ 'manifestEditor.fieldEnum' | translate }}</label>
+                <input data-testid="field-enum" type="text" class="w-full px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                       [value]="fieldEnumText(field)" (input)="setFieldEnum('inputs', $index, $any($event.target).value)" />
+                <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.fieldEnum' | translate }}</p>
+              </div>
+              <div class="flex items-center justify-between">
+                <label class="flex items-center gap-2 text-sm text-gray-300">
+                  <input data-testid="field-required" type="checkbox" [checked]="field.required"
+                         (change)="patchField('inputs', $index, { required: $any($event.target).checked })" />
+                  {{ 'manifestEditor.fieldRequired' | translate }}
+                </label>
+                <button data-testid="remove-field" type="button" class="text-xs px-2 py-1 bg-red-900/60 hover:bg-red-800 rounded" (click)="removeField('inputs', $index)">
+                  {{ 'manifestEditor.removeField' | translate }}
+                </button>
+              </div>
+            </div>
+          }
+          <button data-testid="add-field" type="button" class="text-sm px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded" (click)="addField('inputs')">
+            {{ 'manifestEditor.addField' | translate }}
+          </button>
+        }
+      </fieldset>
+
+      <!-- Sorties -->
+      <fieldset class="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
+        <legend class="px-2 text-sm font-medium text-gray-200">{{ 'manifestEditor.sectionOutputs' | translate }}</legend>
+        <label class="flex items-center gap-2 text-sm text-gray-300">
+          <input data-testid="mf-outputs-enabled" type="checkbox" [checked]="model().outputs.present"
+                 (change)="toggleOutputs($any($event.target).checked)" />
+          {{ 'manifestEditor.declareOutputs' | translate }}
+        </label>
+        <p class="text-xs text-gray-500">{{ 'manifestEditor.help.outputs' | translate }}</p>
+
+        @if (model().outputs.present) {
+          @if (!model().outputs.editable) {
+            <p data-testid="outputs-locked" class="text-xs text-amber-300">{{ 'manifestEditor.schemaLocked' | translate }}</p>
+          } @else {
+            @for (field of model().outputs.fields; track $index) {
+              <div data-testid="output-field" class="border border-gray-700 rounded p-3 grid gap-2 sm:grid-cols-4 items-end">
+                <div>
+                  <label class="block text-xs text-gray-400 mb-1">{{ 'manifestEditor.fieldName' | translate }}</label>
+                  <input data-testid="output-field-name" type="text" class="w-full px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                         [value]="field.name" (input)="patchField('outputs', $index, { name: $any($event.target).value })" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-400 mb-1">{{ 'manifestEditor.fieldType' | translate }}</label>
+                  <select data-testid="output-field-type" class="w-full px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm"
+                          [value]="field.type" (change)="patchField('outputs', $index, { type: $any($event.target).value })">
+                    @for (option of fieldTypes; track option) {
+                      <option [value]="option" [selected]="option === field.type">{{ option }}</option>
+                    }
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-400 mb-1">{{ 'manifestEditor.fieldDescription' | translate }}</label>
+                  <input data-testid="output-field-description" type="text" class="w-full px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm"
+                         [value]="field.description" (input)="patchField('outputs', $index, { description: $any($event.target).value })" />
+                </div>
+                <button data-testid="remove-output-field" type="button" class="text-xs px-2 py-1 bg-red-900/60 hover:bg-red-800 rounded" (click)="removeField('outputs', $index)">
+                  {{ 'manifestEditor.removeField' | translate }}
+                </button>
+              </div>
+            }
+            <button data-testid="add-output-field" type="button" class="text-sm px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded" (click)="addField('outputs')">
+              {{ 'manifestEditor.addField' | translate }}
+            </button>
+          }
+        }
+      </fieldset>
+
+      <!-- Permissions -->
+      <fieldset class="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
+        <legend class="px-2 text-sm font-medium text-gray-200">{{ 'manifestEditor.sectionPermissions' | translate }}</legend>
+
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-vcs">{{ 'manifestEditor.vcs' | translate }}</label>
+            <select id="mf-vcs" data-testid="mf-vcs" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                    [value]="model().vcs" (change)="patch({ vcs: $any($event.target).value })">
+              @for (option of vcsOptions(); track option) {
+                <option [value]="option" [selected]="option === model().vcs">{{ option }}</option>
+              }
+            </select>
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.vcs' | translate }}</p>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-network">{{ 'manifestEditor.network' | translate }}</label>
+            <select id="mf-network" data-testid="mf-network" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                    [value]="model().network" (change)="patch({ network: $any($event.target).value })">
+              @for (option of networkOptions(); track option) {
+                <option [value]="option" [selected]="option === model().network">{{ option }}</option>
+              }
+            </select>
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.network' | translate }}</p>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="mf-allowlist">{{ 'manifestEditor.networkAllowlist' | translate }}</label>
+          <input id="mf-allowlist" data-testid="mf-allowlist" type="text" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                 [value]="allowlistText()" (input)="setAllowlist($any($event.target).value)" />
+          <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.networkAllowlist' | translate }}</p>
+        </div>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="mf-secrets">{{ 'manifestEditor.secrets' | translate }}</label>
+          <input id="mf-secrets" data-testid="mf-secrets" type="text" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                 [value]="secretsText()" (input)="setSecrets($any($event.target).value)" />
+          <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.secrets' | translate }}</p>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm text-gray-300">
+          <input data-testid="mf-docker" type="checkbox" [checked]="model().docker" (change)="patch({ docker: $any($event.target).checked })" />
+          {{ 'manifestEditor.docker' | translate }}
+        </label>
+        <p class="text-xs text-gray-500">{{ 'manifestEditor.help.docker' | translate }}</p>
+
+        <label class="flex items-center gap-2 text-sm text-gray-300">
+          <input data-testid="mf-writable-rootfs" type="checkbox" [checked]="model().writableRootfs" (change)="patch({ writableRootfs: $any($event.target).checked })" />
+          {{ 'manifestEditor.writableRootfs' | translate }}
+        </label>
+        <p class="text-xs text-gray-500">{{ 'manifestEditor.help.writableRootfs' | translate }}</p>
+      </fieldset>
+
+      <!-- Exécution -->
+      <fieldset class="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
+        <legend class="px-2 text-sm font-medium text-gray-200">{{ 'manifestEditor.sectionRuntime' | translate }}</legend>
+
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-profile">{{ 'manifestEditor.profile' | translate }}</label>
+            <select id="mf-profile" data-testid="mf-profile" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                    [value]="model().runtimeProfile" (change)="patch({ runtimeProfile: $any($event.target).value })">
+              @for (option of profileOptions(); track option) {
+                <option [value]="option" [selected]="option === model().runtimeProfile">{{ option }}</option>
+              }
+            </select>
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.profile' | translate }}</p>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-cpu">{{ 'manifestEditor.cpu' | translate }}</label>
+            <input id="mf-cpu" data-testid="mf-cpu" type="number" min="1" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                   [value]="model().cpu" (input)="patchNumber('cpu', $any($event.target).value)" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.cpu' | translate }}</p>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-memory">{{ 'manifestEditor.memory' | translate }}</label>
+            <input id="mf-memory" data-testid="mf-memory" type="text" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                   [value]="model().memory" (input)="patch({ memory: $any($event.target).value })" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.memory' | translate }}</p>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-disk">{{ 'manifestEditor.disk' | translate }}</label>
+            <input id="mf-disk" data-testid="mf-disk" type="text" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
+                   [value]="model().disk" (input)="patch({ disk: $any($event.target).value })" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.disk' | translate }}</p>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-sm text-gray-400 mb-1" for="mf-duration">{{ 'manifestEditor.maxDuration' | translate }}</label>
+            <input id="mf-duration" data-testid="mf-duration" type="number" min="1" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                   [value]="model().maxDurationSeconds" (input)="patchNumber('maxDurationSeconds', $any($event.target).value)" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.maxDuration' | translate }}</p>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Budgets -->
+      <fieldset class="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
+        <legend class="px-2 text-sm font-medium text-gray-200">{{ 'manifestEditor.sectionBudget' | translate }}</legend>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-budget-default">{{ 'manifestEditor.defaultMaxUsd' | translate }}</label>
+            <input id="mf-budget-default" data-testid="mf-budget-default" type="number" step="0.5" min="0" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                   [value]="model().defaultMaxUsd" (input)="patchNumber('defaultMaxUsd', $any($event.target).value)" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.defaultMaxUsd' | translate }}</p>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="mf-budget-hard">{{ 'manifestEditor.hardMaxUsd' | translate }}</label>
+            <input id="mf-budget-hard" data-testid="mf-budget-hard" type="number" step="0.5" min="0" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                   [value]="model().hardMaxUsd" (input)="patchNumber('hardMaxUsd', $any($event.target).value)" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.hardMaxUsd' | translate }}</p>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Approbations -->
+      <fieldset class="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
+        <legend class="px-2 text-sm font-medium text-gray-200">{{ 'manifestEditor.sectionApprovals' | translate }}</legend>
+        <label class="flex items-center gap-2 text-sm text-gray-300">
+          <input data-testid="mf-approvals-enabled" type="checkbox" [checked]="model().approvalsEnabled"
+                 (change)="patch({ approvalsEnabled: $any($event.target).checked })" />
+          {{ 'manifestEditor.approvalsEnabled' | translate }}
+        </label>
+        <p class="text-xs text-gray-500">{{ 'manifestEditor.help.approvals' | translate }}</p>
+
+        @if (model().approvalsEnabled) {
+          <div data-testid="mf-approvals" class="grid gap-3 sm:grid-cols-2 border-l-2 border-gray-700 pl-3">
+            <div>
+              <label class="block text-sm text-gray-400 mb-1" for="mf-approval-role">{{ 'manifestEditor.approvalRole' | translate }}</label>
+              <select id="mf-approval-role" data-testid="mf-approval-role" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                      [value]="model().approvalRole" (change)="patch({ approvalRole: $any($event.target).value })">
+                @for (option of roleOptions(); track option) {
+                  <option [value]="option" [selected]="option === model().approvalRole">{{ option }}</option>
+                }
+              </select>
+              <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.approvalRole' | translate }}</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-400 mb-1" for="mf-approval-count">{{ 'manifestEditor.approvalCount' | translate }}</label>
+              <input id="mf-approval-count" data-testid="mf-approval-count" type="number" min="1" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+                     [value]="model().approvalCount" (input)="patchNumber('approvalCount', $any($event.target).value)" />
+              <p class="text-xs text-gray-500 mt-1">{{ 'manifestEditor.help.approvalCount' | translate }}</p>
+            </div>
+          </div>
+        }
+      </fieldset>
+
+      <!-- Aperçu -->
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm font-medium text-gray-200">{{ 'manifestEditor.sectionPreview' | translate }}</span>
+        </div>
+        <p class="text-xs text-gray-500 mb-2">{{ 'manifestEditor.help.preview' | translate }}</p>
+        <pre data-testid="yaml-preview" class="text-xs font-mono bg-gray-900 border border-gray-700 rounded p-3 overflow-x-auto">{{ preview() }}</pre>
+      </div>
+    </div>
+  }
+</div>

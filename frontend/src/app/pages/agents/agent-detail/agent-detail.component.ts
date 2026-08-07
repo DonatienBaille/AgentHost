@@ -3,6 +3,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { DatePipe } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { TranslatePipe } from '@ngx-translate/core';
+import { ManifestEditorComponent } from '../../../components/manifest-editor/manifest-editor.component';
 import { AgentService } from '../../../services/agent.service';
 import { AuthService } from '../../../services/auth.service';
 import { Agent } from '../../../core/models';
@@ -10,7 +11,7 @@ import { Agent } from '../../../core/models';
 @Component({
   selector: 'app-agent-detail',
   standalone: true,
-  imports: [ReactiveFormsModule, DatePipe, TranslatePipe],
+  imports: [ReactiveFormsModule, DatePipe, TranslatePipe, ManifestEditorComponent],
   templateUrl: './agent-detail.component.html',
   styleUrls: ['./agent-detail.component.css'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -78,6 +79,15 @@ export class AgentDetailComponent implements OnInit {
     } catch {
       // surfaced via agentService.error already
     }
+  }
+
+  /**
+   * Le manifeste ne sort plus d'un `<textarea>` mais de l'éditeur à deux modes. Il continue de
+   * passer par le contrôle réactif : c'est lui qui porte la validation « non vide » et c'est lui
+   * que `publish()` lit.
+   */
+  onManifestYaml(manifestYaml: string): void {
+    this.publishForm.controls.manifestYaml.setValue(manifestYaml);
   }
 
   async publish(): Promise<void> {

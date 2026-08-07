@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-398 tests backend, 596 tests frontend, 12 tests end-to-end Playwright, build sans warning.
+CHIFFRES_A_MESURER
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
 contient** concrètement, et **à quoi on reconnaît qu'il est fini**. L'ordre est un défaut
@@ -176,35 +176,60 @@ les trois surfaces ci-dessus ont tourné au moins une fois contre le vrai servic
 
 ---
 
-## Lot 2 — Configuration des agents : deux modes, YAML et UI
+## Lot 2 — Configuration des agents : deux modes, YAML et UI ✅ livré
 
-**Pourquoi.** Aujourd'hui, définir un agent impose d'écrire un manifeste YAML à la main. C'est
-puissant et versionnable, mais cela réserve la création d'agents à un public technique, alors que la
+**Pourquoi.** Définir un agent imposait d'écrire un manifeste YAML à la main. C'est puissant et
+versionnable, mais cela réservait la création d'agents à un public technique, alors que la
 plateforme vise aussi des utilisateurs métier qui doivent pouvoir composer un agent sans connaître
 la syntaxe.
 
-**Contenu.**
+**Livré.** `components/manifest-editor`, branché sur les deux endroits qui écrivaient un manifeste à
+la main : la création (`agents-list`) et la publication d'une nouvelle version (`agent-detail`).
 
-- **Mode UI (par défaut).** Un formulaire structuré couvrant tout le manifeste : identité
-  (nom, description), type et image, schéma d'entrées (constructeur de champs), permissions
-  (réseau, secrets, VCS, docker), profil d'exécution (CPU, mémoire, disque, durée max), budgets
-  (défaut et plafond dur), et portes d'approbation (`approvals.beforeWrite` avec rôle et nombre
-  requis). Chaque champ documenté en ligne.
-- **Mode YAML (avancé).** L'éditeur actuel, avec coloration syntaxique, validation en direct contre
-  le parseur du backend, et messages d'erreur situés sur la ligne fautive.
-- **Bascule réversible entre les deux.** C'est le point délicat et ce qui fait la valeur de la
-  fonctionnalité : le formulaire doit produire le YAML canonique, et le YAML doit se relire dans le
-  formulaire. Un manifeste qui utilise des constructions non représentables dans le formulaire doit
-  le **dire** (bandeau « ce manifeste contient des éléments avancés ; passer en mode formulaire
-  perdrait X ») plutôt que de tronquer silencieusement.
-- **Le YAML reste la source de vérité** persistée et versionnée. Le mode UI est une projection,
-  pas un format de stockage parallèle — sinon on se retrouve avec deux représentations à
-  réconcilier.
-- Aperçu du YAML généré en direct depuis le mode formulaire, pour l'apprentissage et la revue.
+- **Mode UI, par défaut.** Huit sections couvrant le manifeste : identité, type et image ou
+  fournisseur externe avec ses réglages, constructeur de champs pour les entrées **et** les sorties,
+  permissions (VCS, réseau, allowlist, secrets, docker, rootfs inscriptible), profil d'exécution,
+  budgets, porte d'approbation. Chaque champ porte une phrase disant ce qu'il fait, en FR et EN.
+- **Mode YAML, avancé.** Le même `<textarea>` qu'avant — aucune capacité retirée — plus la
+  validation en direct contre `POST /api/agents/validate-manifest`, nouvel endpoint qui fait tourner
+  le **vrai** `IAgentManifestParser` et renvoie la ligne fautive quand YamlDotNet la connaît.
+- **Bascule réversible.** Le formulaire produit le YAML canonique ; le YAML se relit dans le
+  formulaire par le serveur. L'aller-retour est sans perte sur un manifeste non trivial, et cette
+  attente est vérifiée des deux côtés : le texte canonique attendu par le test frontend est rejoué à
+  l'octet près contre le vrai parseur (`CanonicalManifestContractTests`).
+- **Politique des constructions non représentables : préserver et nommer.** Une clé inconnue est
+  gardée telle quelle et réémise à sa place ; un schéma hors du sous-ensemble éditable est gardé
+  entier et rendu non éditable ; un bandeau nomme chaque cas avec son chemin précis. La bascule
+  n'est refusée que dans le seul cas où il n'y a rien à projeter : un YAML qui ne parse pas.
+- **Le YAML reste la source de vérité.** Rien du modèle de formulaire n'est persisté, et le YAML
+  d'origine n'est réécrit qu'au premier vrai changement — ouvrir l'onglet pour regarder ne reformate
+  le fichier de personne.
+- **Aperçu du YAML généré en direct** depuis le mode formulaire.
+
+Arbitrages, limites connues et méthode de vérification :
+[docs/manifest-editor.md](docs/manifest-editor.md).
+
+**Ce qui reste.**
+
+- Pas de **coloration syntaxique** ni d'autocomplétion en mode YAML : c'est un `<textarea>` nu. La
+  faire proprement veut dire une dépendance d'éditeur (CodeMirror, Monaco), qui n'a pas été prise.
+- Les **ancres et alias YAML** sont développés par la projection JSON. Un fragment préservé qui en
+  contenait est réémis développé : même sens, texte différent, et ce n'est **pas** signalé — la
+  seule perte silencieuse qui subsiste.
+- La détection des **commentaires** repose sur une heuristique textuelle : un `#` dans une chaîne
+  non citée (`description: rapport #12`) déclenche un avertissement inutile. Faux positif assumé,
+  faux négatif refusé.
+- Le constructeur de champs ne **crée** ni schémas imbriqués, ni tableaux, ni compositions
+  (`oneOf`, `$ref`, `additionalProperties`) ; il les préserve mais n'ouvre pas leur édition. Les
+  ouvrir n'a de sens qu'une fois que `new-run-form` saura les rendre.
+- La validation en direct est un aller-retour serveur, anti-rebond de 400 ms, sans repli hors ligne.
+- Rien n'a été exercé dans un navigateur : les 97 tests du lot sont des tests de composant et
+  d'intégration HTTP, pas une session réelle.
 
 **Fini quand.** Un utilisateur non technique crée un agent fonctionnel sans écrire une ligne de
 YAML ; un aller-retour formulaire → YAML → formulaire sur un manifeste non trivial est sans perte ;
-les cas non représentables sont signalés explicitement.
+les cas non représentables sont signalés explicitement. — Les deux derniers sont vérifiés par
+tests ; le premier demande un utilisateur réel devant l'IHM.
 
 ---
 

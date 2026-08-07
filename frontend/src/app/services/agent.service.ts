@@ -6,6 +6,7 @@ import {
   Agent,
   AgentVersion,
   CreateAgentRequest,
+  ManifestValidation,
   PublishAgentVersionRequest,
 } from '../core/models';
 
@@ -75,6 +76,19 @@ export class AgentService {
     const agent = await firstValueFrom(this.http.post<Agent>(BASE_URL, req));
     this.agents.set([...this.agents(), agent]);
     return agent;
+  }
+
+  /**
+   * Dry-runs the manifest through the server's own parser (backend:
+   * POST /api/agents/validate-manifest). Creates nothing.
+   *
+   * Deliberately outside the `error` signal: the editor shows the failure inline, on the offending
+   * line, and a manifest that does not parse yet is not a page-level error.
+   */
+  async validateManifest(manifestYaml: string): Promise<ManifestValidation> {
+    return firstValueFrom(
+      this.http.post<ManifestValidation>(`${BASE_URL}/validate-manifest`, { manifestYaml }),
+    );
   }
 
   /** Version history for an agent (backend: GET /api/agents/{id}/versions). */

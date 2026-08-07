@@ -8,8 +8,8 @@ import { of } from 'rxjs';
 import { AgentsListComponent } from './agents-list.component';
 import { AgentService } from '../../../services/agent.service';
 import { AuthService } from '../../../services/auth.service';
-import { Agent, CreateAgentRequest, UserRole } from '../../../core/models';
-import { agent, user } from '../../../core/testing/fixtures';
+import { Agent, CreateAgentRequest, ManifestValidation, UserRole } from '../../../core/models';
+import { agent, manifestValidation, user } from '../../../core/testing/fixtures';
 
 const MANIFEST = 'name: redacteur\nversion: 1\ninputs: {}';
 
@@ -21,6 +21,14 @@ class AgentServiceStub {
   readonly listAgents = vi.fn(async (_projectId?: string) => {});
   readonly createAgent = vi.fn(async (req: CreateAgentRequest) =>
     agent({ name: req.name, slug: req.slug, projectId: req.projectId }),
+  );
+  /**
+   * L'éditeur de manifeste embarqué valide en direct. Le double répond « valide » sans réseau :
+   * ce qu'il renvoie n'est pas le sujet ici, ces tests portent sur la page qui l'entoure.
+   */
+  readonly validateManifest = vi.fn(
+    async (_manifestYaml: string): Promise<ManifestValidation> =>
+      manifestValidation({ metadata: { name: 'stub' }, spec: { type: 'oci' } }),
   );
 }
 
