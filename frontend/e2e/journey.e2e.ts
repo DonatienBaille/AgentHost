@@ -64,8 +64,11 @@ async function createPublishedAgent(page: Page, projectId: string, slug: string)
 
   await page.locator('#a-name').fill(`Agent ${slug}`);
   await page.locator('#a-slug').fill(slug);
-  await page.locator('#a-manifest').fill(manifest(slug));
-  await page.getByRole('checkbox').check();
+  // Le manifeste s'écrit désormais dans l'éditeur à deux modes ; ce parcours passe par le YAML.
+  await page.locator('[data-testid="mode-yaml"]').click();
+  await page.locator('#manifest-yaml').fill(manifest(slug));
+  // Ciblée par son testid : le formulaire porte maintenant plusieurs cases à cocher.
+  await page.locator('[data-testid="publish-immediately"]').check();
   await page.getByRole('button', { name: 'Créer', exact: true }).click();
 
   const card = page.locator('a[href^="/agents/"]').filter({ hasText: slug });

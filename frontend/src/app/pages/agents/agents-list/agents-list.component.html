@@ -43,7 +43,7 @@
         <app-manifest-editor (yamlChange)="onManifestYaml($event)" />
       </div>
       <label class="flex items-center gap-2 text-sm text-gray-300">
-        <input type="checkbox" formControlName="publish" />
+        <input data-testid="publish-immediately" type="checkbox" formControlName="publish" />
         {{ 'agentsList.publishImmediately' | translate }}
       </label>
       <button
