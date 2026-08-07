@@ -123,11 +123,13 @@ builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 builder.Services.AddScoped<IInvitationRepository, InvitationRepository>();
 builder.Services.AddScoped<IPasswordResetTokenRepository, PasswordResetTokenRepository>();
 builder.Services.AddScoped<IUserMfaRepository, UserMfaRepository>();
+builder.Services.AddScoped<ITriggerRepository, TriggerRepository>();
 
 // ---- Services ----
 builder.Services.AddScoped<IRunService, RunService>();
 builder.Services.AddScoped<IAgentService, AgentService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<ITriggerService, TriggerService>();
 builder.Services.AddScoped<IMemoryService, MemoryService>();
 // ---- Orchestration : en processus (défaut) ou déléguée au tier runner ----
 //
@@ -256,6 +258,11 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<RunWatchdog>());
 
 // ---- On-disk retention: orphaned plaintext secrets, expired run workspaces/artifacts ----
 builder.Services.AddHostedService<RunDataJanitor>();
+
+// ---- Trigger scheduler: fires cron triggers (lot 4) ----
+// Registered on every replica: the claim is atomic (triggers.next_run_at), so several schedulers
+// racing on the same due row is the normal case, not a misconfiguration. See TriggerScheduler.
+builder.Services.AddHostedService<TriggerScheduler>();
 
 // ---- SignalR ----
 // AddJsonProtocol uses its own JsonSerializerOptions, separate from ConfigureHttpJsonOptions
@@ -503,6 +510,7 @@ app.MapProjectEndpoints();
 app.MapApprovalEndpoints();
 app.MapMemoryEndpoints();
 app.MapWebhookEndpoints();
+app.MapTriggerEndpoints();
 app.MapOrganizationEndpoints();
 app.MapUserEndpoints();
 app.MapAuditEndpoints();
