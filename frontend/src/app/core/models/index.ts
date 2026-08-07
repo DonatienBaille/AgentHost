@@ -12,3 +12,4 @@ export * from './secret.model';
 export * from './webhook.model';
 export * from './audit.model';
 export * from './artifact.model';
+export * from './metrics.model';

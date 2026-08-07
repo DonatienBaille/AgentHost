@@ -9,7 +9,8 @@
     "adminOrganizations": "Organizations",
     "adminSecrets": "Secrets",
     "adminAuditLog": "Audit log",
-    "logout": "Log out"
+    "logout": "Log out",
+    "monitoring": "Monitoring"
   },
   "common": {
     "refresh": "Refresh",
@@ -264,7 +265,8 @@
     "cancelRun": "Failed to cancel the run.",
     "approveRun": "Failed to record the decision.",
     "answerQuestion": "Failed to send the answer.",
-    "loadArtifacts": "Failed to load artifacts."
+    "loadArtifacts": "Failed to load artifacts.",
+    "loadMetrics": "Failed to load the metrics."
   },
   "approvalType": {
     "gate": "Gate",
@@ -399,6 +401,33 @@
       "approvalRole": "The minimum role for someone whose approval counts.",
       "approvalCount": "How many distinct approvals are needed before resuming.",
       "preview": "Exactly what will be stored if you submit this form."
+    }
+  },
+  "monitoring": {
+    "title": "Monitoring",
+    "subtitle": "Activity, cost and health of your agents over the last {{days}} days.",
+    "lastDays": "{{days}}d",
+    "totalRuns": "Runs",
+    "successRate": "Success rate",
+    "cost": "Cost",
+    "averageDuration": "Average duration",
+    "inFlight": "In flight",
+    "failed": "Failures",
+    "infraErrors": "Infrastructure errors",
+    "budgetExceeded": "Budgets exhausted",
+    "runsPerDay": "Runs per day",
+    "byAgent": "By agent",
+    "byProject": "By project",
+    "agent": "Agent",
+    "project": "Project",
+    "runs": "Runs",
+    "budget": "Budget",
+    "noData": "No data over this period.",
+    "alerts": {
+      "budgetExceeded": "Project “{{project}}” has exceeded its monthly budget ({{percent}}%).",
+      "budgetNear": "Project “{{project}}” has used {{percent}}% of its monthly budget.",
+      "failureRate": "Agent “{{agent}}” is failing {{percent}}% of its runs.",
+      "approvalStale": "An approval request has been waiting for {{hours}}h."
     }
   }
 }

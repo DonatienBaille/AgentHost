@@ -142,3 +142,53 @@ test.describe('project → agent → run', () => {
     ).toBeVisible();
   });
 });
+
+/**
+ * Le tableau de bord de supervision (lot 3), contre la vraie API.
+ *
+ * Ce que les tests de composants ne peuvent pas attraper : le câblage. Route, lien de navigation,
+ * URL des quatre endpoints, forme réelle des réponses — tout cela est stubbé en test unitaire et
+ * n'existe qu'ici.
+ */
+test.describe('supervision', () => {
+  test('a fresh organization sees an honest empty dashboard, not a broken one', async ({ page }) => {
+    await register(page);
+    await page.goto('/monitoring');
+
+    // Zéro run : les compteurs doivent afficher 0, pas rester vides ni montrer NaN.
+    await expect(page.getByTestId('stat-runs')).toHaveText('0', { timeout: 20_000 });
+    await expect(page.getByTestId('stat-success-rate')).toHaveText('0%');
+    await expect(page.getByTestId('agents-empty')).toBeVisible();
+    await expect(page.getByTestId('projects-empty')).toBeVisible();
+  });
+
+  test('a launched run shows up in the dashboard tables', async ({ page }) => {
+    await register(page);
+    const projectSlug = unique('proj');
+    const projectId = await createProject(page, projectSlug);
+    const agentSlug = unique('agent');
+    await createPublishedAgent(page, projectId, agentSlug);
+    await launchRun(page, projectId, agentSlug);
+
+    await page.goto('/monitoring');
+
+    await expect(page.getByTestId('stat-runs')).toHaveText('1', { timeout: 20_000 });
+    // Les deux ventilations viennent de requêtes distinctes : les voir toutes deux prouve que les
+    // quatre endpoints répondent, pas seulement le premier.
+    await expect(page.getByTestId('agent-row')).toHaveCount(1);
+    await expect(page.getByTestId('project-row')).toHaveCount(1);
+    await expect(page.getByTestId('agent-row')).toContainText(`Agent ${agentSlug}`);
+    await expect(page.getByTestId('project-row')).toContainText(`Project ${projectSlug}`);
+  });
+
+  test('the window selector reloads against the server', async ({ page }) => {
+    await register(page);
+    await page.goto('/monitoring');
+    await expect(page.getByTestId('stat-runs')).toBeVisible({ timeout: 20_000 });
+
+    await page.getByTestId('window-7').click();
+
+    // Le sous-titre porte la fenêtre que le serveur a retenue, pas celle demandée.
+    await expect(page.getByText(/7 derniers jours/)).toBeVisible({ timeout: 20_000 });
+  });
+});

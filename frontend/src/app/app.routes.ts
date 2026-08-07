@@ -94,6 +94,13 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'monitoring',
+    loadComponent: () =>
+      import('./pages/monitoring/monitoring.component').then((m) => m.MonitoringComponent),
+    title: 'Agent Host — Monitoring',
+    canActivate: [authGuard],
+  },
+  {
     path: 'runs',
     loadComponent: () =>
       import('./pages/runs/runs-page/runs-page.component').then((m) => m.RunsPageComponent),

@@ -19,6 +19,9 @@
           <a routerLink="/runs" routerLinkActive="text-blue-400" class="text-gray-300 hover:text-white transition whitespace-nowrap">
             {{ 'nav.runs' | translate }}
           </a>
+          <a routerLink="/monitoring" routerLinkActive="text-blue-400" class="text-gray-300 hover:text-white transition whitespace-nowrap">
+            {{ 'nav.monitoring' | translate }}
+          </a>
 
           @if (authService.isMaintainerOrAbove()) {
             <div class="relative group">

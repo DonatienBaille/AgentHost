@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-411 tests backend, 693 tests frontend, 12 tests end-to-end Playwright, build sans warning.
+411 tests backend, 724 tests frontend, 15 tests end-to-end Playwright, build sans warning.
 (Chiffres mesurés en exécutant les trois suites après fusion, pas déduits.)
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
@@ -234,7 +234,7 @@ tests ; le premier demande un utilisateur réel devant l'IHM.
 
 ---
 
-## Lot 3 — Monitoring : OTEL en sortie, UI dans l'IHM 🔶 backend fait, IHM à faire
+## Lot 3 — Monitoring : OTEL en sortie, UI dans l'IHM ✅ livré
 
 **Pourquoi.** L'instrumentation OpenTelemetry existe (traces, métriques, endpoint `/metrics`
 Prometheus, export OTLP configurable), mais elle n'est exploitable qu'avec un Grafana ou équivalent
@@ -264,8 +264,25 @@ deux canaux sont complémentaires, pas redondants.
 10 tests d'intégration contre la vraie base — du SQL ne se vérifie pas à la lecture. Vérifié en
 introduisant une fuite inter-organisation : 4 tests virent au rouge, dont celui qui existe pour ça.
 
-**Reste à faire : tout le tableau de bord dans l'IHM**, les alertes visibles, et le journal d'audit
-filtrable. Les données sont servies ; rien ne les affiche encore.
+**Livré côté IHM.** `pages/monitoring/` : chiffres de tête (runs, réussite, coût, durée moyenne,
+runs en cours), ventilation des échecs — échecs ordinaires, erreurs d'infrastructure et budgets
+épuisés comptés **séparément**, parce qu'un taux de réussite seul ne dit pas où intervenir —, série
+quotidienne en barres, classements par agent et par projet avec la part de budget consommée, et
+sélecteur de fenêtre (7 / 30 / 90 jours).
+
+**Les alertes sont la partie utile.** Un tableau de chiffres demande à être lu et interprété ; une
+alerte dit ce qui ne va pas. Trois seuils, dérivés des données déjà servies — donc rien à configurer,
+donc rien à oublier de configurer : budget à 80 % (avertissement) puis dépassé (danger) ; agent qui
+échoue sur plus de la moitié de ses runs, à partir de 5 runs — en dessous il n'y a rien à conclure ;
+approbation en attente depuis plus de 24 h. Les dangers passent devant : personne ne lit la
+troisième ligne d'un bandeau d'alertes.
+
+Aucune dépendance de graphique : trente barres CSS coûtent moins qu'une bibliothèque et se lisent
+aussi bien. Les barres sont mises à l'échelle du jour le plus chargé, et un jour à zéro garde une
+barre d'un pixel pour se distinguer d'une absence de donnée.
+
+**Reste à faire dans ce lot** : le journal d'audit reste une table brute paginée — il devrait être
+filtrable par action, acteur et période.
 
 **Contenu.**
 

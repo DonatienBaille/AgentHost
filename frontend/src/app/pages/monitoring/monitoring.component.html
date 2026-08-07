@@ -1,0 +1,222 @@
+<!-- src/app/pages/monitoring/monitoring.component.html -->
+
+<div class="p-6 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-2">
+    <h1 class="text-3xl font-bold">{{ 'monitoring.title' | translate }}</h1>
+    <div class="flex items-center gap-2">
+      @for (days of windows; track days) {
+        <button
+          type="button"
+          [attr.data-testid]="'window-' + days"
+          class="px-3 py-1.5 rounded text-sm transition"
+          [class.bg-blue-600]="selectedWindow() === days"
+          [class.bg-gray-800]="selectedWindow() !== days"
+          [class.border]="selectedWindow() !== days"
+          [class.border-gray-700]="selectedWindow() !== days"
+          (click)="selectWindow(days)"
+        >
+          {{ 'monitoring.lastDays' | translate: { days: days } }}
+        </button>
+      }
+      <button
+        type="button"
+        data-testid="refresh"
+        class="px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 hover:bg-gray-700 transition"
+        (click)="refresh()"
+      >
+        {{ 'common.refresh' | translate }}
+      </button>
+    </div>
+  </div>
+  <p class="text-gray-400 mb-8">
+    {{ 'monitoring.subtitle' | translate: { days: windowDays() } }}
+  </p>
+
+  @if (error()) {
+    <div data-testid="monitoring-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+      <p class="text-red-200">{{ error()! | translate }}</p>
+    </div>
+  }
+
+  <!-- Les alertes d'abord : un tableau de chiffres demande à être lu, une alerte dit ce qui ne va pas. -->
+  @if (alerts().length > 0) {
+    <div class="space-y-2 mb-8">
+      @for (alert of alerts(); track alert.key + (alert.params?.['project'] ?? alert.params?.['agent'] ?? '')) {
+        <div
+          [attr.data-testid]="alert.testId"
+          class="rounded-lg p-3 text-sm border"
+          [class.bg-red-900/40]="alert.level === 'danger'"
+          [class.border-red-700]="alert.level === 'danger'"
+          [class.text-red-200]="alert.level === 'danger'"
+          [class.bg-amber-950/40]="alert.level === 'warning'"
+          [class.border-amber-700]="alert.level === 'warning'"
+          [class.text-amber-200]="alert.level === 'warning'"
+        >
+          {{ alert.key | translate: alert.params }}
+        </div>
+      }
+    </div>
+  }
+
+  @if (isLoading()) {
+    <div class="flex justify-center py-8">
+      <div data-testid="monitoring-spinner" class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+  }
+
+  @let summary = overview();
+  @if (summary) {
+    <!-- Chiffres de tête -->
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-sm text-gray-400">{{ 'monitoring.totalRuns' | translate }}</div>
+        <div data-testid="stat-runs" class="text-3xl font-bold mt-1">{{ summary.totalRuns }}</div>
+      </div>
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-sm text-gray-400">{{ 'monitoring.successRate' | translate }}</div>
+        <div data-testid="stat-success-rate" class="text-3xl font-bold mt-1 text-green-400">
+          {{ successRate() | number: '1.0-0' }}%
+        </div>
+      </div>
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-sm text-gray-400">{{ 'monitoring.cost' | translate }}</div>
+        <div data-testid="stat-cost" class="text-3xl font-bold mt-1">
+          {{ summary.costUsd | number: '1.2-2' }} $
+        </div>
+      </div>
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-sm text-gray-400">{{ 'monitoring.averageDuration' | translate }}</div>
+        <div data-testid="stat-duration" class="text-3xl font-bold mt-1">
+          {{ humanDuration(summary.averageDurationMs) }}
+        </div>
+      </div>
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-sm text-gray-400">{{ 'monitoring.inFlight' | translate }}</div>
+        <div data-testid="stat-in-flight" class="text-3xl font-bold mt-1">{{ summary.inFlightRuns }}</div>
+      </div>
+    </div>
+
+    <!-- Ventilation des échecs : un taux de réussite seul ne dit pas où intervenir. -->
+    <div class="grid gap-4 sm:grid-cols-3 mb-8">
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-sm text-gray-400">{{ 'monitoring.failed' | translate }}</div>
+        <div data-testid="stat-failed" class="text-2xl font-bold mt-1 text-red-400">{{ summary.failedRuns }}</div>
+      </div>
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <!-- Séparé des échecs ordinaires : un agent qui échoue fait son travail, une
+             infrastructure qui échoue est notre problème. -->
+        <div class="text-sm text-gray-400">{{ 'monitoring.infraErrors' | translate }}</div>
+        <div data-testid="stat-infra" class="text-2xl font-bold mt-1 text-orange-400">{{ summary.infraErrorRuns }}</div>
+      </div>
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-sm text-gray-400">{{ 'monitoring.budgetExceeded' | translate }}</div>
+        <div data-testid="stat-budget-exceeded" class="text-2xl font-bold mt-1 text-amber-400">
+          {{ summary.budgetExceededRuns }}
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Série quotidienne, en barres CSS : une bibliothèque de graphiques pour trente barres
+       coûterait plus qu'elle ne rapporte, et la lecture ne serait pas meilleure. -->
+  @if (chartBars().length > 0) {
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-8">
+      <h2 class="text-lg font-semibold mb-4">{{ 'monitoring.runsPerDay' | translate }}</h2>
+      <div class="flex items-end gap-1 h-40">
+        @for (bar of chartBars(); track bar.point.day) {
+          <div
+            data-testid="chart-bar"
+            class="flex-1 bg-blue-600/70 hover:bg-blue-500 rounded-t transition"
+            [style.height.%]="bar.heightPercent"
+            [attr.title]="bar.point.day + ' — ' + bar.point.runs"
+            [attr.aria-label]="bar.point.day + ' : ' + bar.point.runs"
+          ></div>
+        }
+      </div>
+      <div class="flex justify-between text-xs text-gray-500 mt-2">
+        <span>{{ dayLabel(chartBars()[0].point) }}</span>
+        <span>{{ dayLabel(chartBars()[chartBars().length - 1].point) }}</span>
+      </div>
+    </div>
+  }
+
+  <div class="grid gap-6 lg:grid-cols-2">
+    <!-- Par agent -->
+    <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
+      <h2 class="text-lg font-semibold p-4 pb-2">{{ 'monitoring.byAgent' | translate }}</h2>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-gray-400 border-b border-gray-700">
+            <th class="px-4 py-2">{{ 'monitoring.agent' | translate }}</th>
+            <th class="px-4 py-2 text-right">{{ 'monitoring.runs' | translate }}</th>
+            <th class="px-4 py-2 text-right">{{ 'monitoring.successRate' | translate }}</th>
+            <th class="px-4 py-2 text-right">{{ 'monitoring.cost' | translate }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (agent of byAgent(); track agent.agentId) {
+            <tr data-testid="agent-row" class="border-b border-gray-700 last:border-0">
+              <td class="px-4 py-2">
+                <a [routerLink]="['/agents', agent.agentId]" class="text-blue-400 hover:text-blue-300">
+                  {{ agent.name }}
+                </a>
+              </td>
+              <td class="px-4 py-2 text-right">{{ agent.runs }}</td>
+              <td class="px-4 py-2 text-right">{{ ratePercent(agent.runs, agent.succeeded) }}%</td>
+              <td class="px-4 py-2 text-right">{{ agent.costUsd | number: '1.2-2' }} $</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+      @if (!isLoading() && byAgent().length === 0) {
+        <p data-testid="agents-empty" class="text-gray-500 text-sm p-4">{{ 'monitoring.noData' | translate }}</p>
+      }
+    </div>
+
+    <!-- Par projet, avec le budget : un coût sans plafond est un nombre sans signification. -->
+    <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
+      <h2 class="text-lg font-semibold p-4 pb-2">{{ 'monitoring.byProject' | translate }}</h2>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-gray-400 border-b border-gray-700">
+            <th class="px-4 py-2">{{ 'monitoring.project' | translate }}</th>
+            <th class="px-4 py-2 text-right">{{ 'monitoring.runs' | translate }}</th>
+            <th class="px-4 py-2 text-right">{{ 'monitoring.cost' | translate }}</th>
+            <th class="px-4 py-2 text-right">{{ 'monitoring.budget' | translate }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (project of byProject(); track project.projectId) {
+            <tr data-testid="project-row" class="border-b border-gray-700 last:border-0">
+              <td class="px-4 py-2">
+                <a [routerLink]="['/projects', project.projectId]" class="text-blue-400 hover:text-blue-300">
+                  {{ project.name }}
+                </a>
+              </td>
+              <td class="px-4 py-2 text-right">{{ project.runs }}</td>
+              <td class="px-4 py-2 text-right">{{ project.costUsd | number: '1.2-2' }} $</td>
+              <td class="px-4 py-2 text-right">
+                @let percent = budgetPercent(project);
+                @if (percent === null) {
+                  <!-- Aucun plafond fixé : il n'y a rien à dépasser, et afficher 0 % mentirait. -->
+                  <span data-testid="budget-none" class="text-gray-500">—</span>
+                } @else {
+                  <span
+                    data-testid="budget-percent"
+                    [class.text-red-400]="percent >= 100"
+                    [class.text-amber-400]="percent >= 80 && percent < 100"
+                  >
+                    {{ percent }}%
+                  </span>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+      @if (!isLoading() && byProject().length === 0) {
+        <p data-testid="projects-empty" class="text-gray-500 text-sm p-4">{{ 'monitoring.noData' | translate }}</p>
+      }
+    </div>
+  </div>
+</div>

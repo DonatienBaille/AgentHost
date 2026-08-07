@@ -9,7 +9,8 @@
     "adminOrganizations": "Organisations",
     "adminSecrets": "Secrets",
     "adminAuditLog": "Journal d'audit",
-    "logout": "Déconnexion"
+    "logout": "Déconnexion",
+    "monitoring": "Supervision"
   },
   "common": {
     "refresh": "Actualiser",
@@ -264,7 +265,8 @@
     "cancelRun": "Échec de l'annulation du run.",
     "approveRun": "Échec de l'enregistrement de la décision.",
     "answerQuestion": "Échec de l'envoi de la réponse.",
-    "loadArtifacts": "Échec du chargement des artefacts."
+    "loadArtifacts": "Échec du chargement des artefacts.",
+    "loadMetrics": "Échec du chargement des indicateurs."
   },
   "approvalType": {
     "gate": "Validation",
@@ -399,6 +401,33 @@
       "approvalRole": "Le rôle minimal d'une personne dont l'accord compte.",
       "approvalCount": "Combien d'accords distincts il faut avant de reprendre.",
       "preview": "Exactement ce qui sera enregistré si vous validez ce formulaire."
+    }
+  },
+  "monitoring": {
+    "title": "Supervision",
+    "subtitle": "Activité, coûts et santé de vos agents sur les {{days}} derniers jours.",
+    "lastDays": "{{days}} j",
+    "totalRuns": "Runs",
+    "successRate": "Réussite",
+    "cost": "Coût",
+    "averageDuration": "Durée moyenne",
+    "inFlight": "En cours",
+    "failed": "Échecs",
+    "infraErrors": "Erreurs d'infrastructure",
+    "budgetExceeded": "Budgets épuisés",
+    "runsPerDay": "Runs par jour",
+    "byAgent": "Par agent",
+    "byProject": "Par projet",
+    "agent": "Agent",
+    "project": "Projet",
+    "runs": "Runs",
+    "budget": "Budget",
+    "noData": "Aucune donnée sur cette période.",
+    "alerts": {
+      "budgetExceeded": "Le projet « {{project}} » a dépassé son budget mensuel ({{percent}} %).",
+      "budgetNear": "Le projet « {{project}} » a consommé {{percent}} % de son budget mensuel.",
+      "failureRate": "L'agent « {{agent}} » échoue sur {{percent}} % de ses runs.",
+      "approvalStale": "Une demande d'approbation attend depuis {{hours}} h."
     }
   }
 }
