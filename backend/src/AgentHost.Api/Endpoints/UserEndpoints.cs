@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using AgentHost.Api.Contracts;
 using AgentHost.Api.Domain;
 using AgentHost.Api.Infrastructure;
@@ -59,7 +60,13 @@ public static class UserEndpoints
         };
 
         await repository.InsertAsync(user, ct);
-        await auditService.RecordAsync(caller.OrgId, "user.created", caller.UserId, "user", user.Id, ct: ct);
+        // La cible n'est résolue nulle part : la consultation du journal joint l'ACTEUR à la table
+        // des utilisateurs, pas la ressource. Sans ces deux champs, « user.created 01HZX… » ne dit
+        // pas quel compte a été ouvert, ni avec quel pouvoir.
+        await auditService.RecordAsync(
+            caller.OrgId, "user.created", caller.UserId, "user", user.Id,
+            details: new JsonObject { ["email"] = user.Email, ["role"] = user.Role.ToDbString() },
+            ct: ct);
         return Results.Created($"/api/users/{user.Id}", user);
     }
 
@@ -69,13 +76,38 @@ public static class UserEndpoints
         var user = await repository.GetAsync(id, caller.OrgId, ct);
         if (user is null) return Results.NotFound();
 
+        var previousRole = user.Role;
+        var previousDisplayName = user.DisplayName;
+
         if (req.DisplayName is not null) user.DisplayName = req.DisplayName;
         if (req.Role is not null) user.Role = req.Role.Value;
         if (!string.IsNullOrEmpty(req.Password)) user.PasswordHash = PasswordHasher.Hash(req.Password);
         user.UpdatedAt = DateTime.UtcNow;
 
         await repository.UpdateAsync(user, ct);
-        await auditService.RecordAsync(caller.OrgId, "user.updated", caller.UserId, "user", user.Id, ct: ct);
+
+        // La colonne `changes` existait depuis l'origine et personne ne l'alimentait : le journal
+        // savait dire QUE ce compte avait été modifié, jamais EN QUOI. Or l'élévation de privilège
+        // est précisément l'événement pour lequel on tient un journal d'audit — « qui m'a donné le
+        // rôle owner, et quand » n'a pas de réponse si l'entrée ne porte que l'identifiant.
+        //
+        // Le mot de passe fait exception et n'est noté que comme rotation : ni l'ancienne valeur ni
+        // la nouvelle n'ont à figurer dans une table que le journal rend consultable à tout
+        // mainteneur, et l'empreinte n'y apprendrait rien à personne.
+        var changes = new JsonObject();
+        if (req.Role is not null && req.Role.Value != previousRole)
+            changes["role"] = new JsonObject { ["from"] = previousRole.ToDbString(), ["to"] = user.Role.ToDbString() };
+        if (req.DisplayName is not null && req.DisplayName != previousDisplayName)
+            changes["displayName"] = new JsonObject { ["from"] = previousDisplayName, ["to"] = user.DisplayName };
+        if (!string.IsNullOrEmpty(req.Password))
+            changes["password"] = "rotated";
+
+        await auditService.RecordAsync(
+            caller.OrgId, "user.updated", caller.UserId, "user", user.Id,
+            // Une requête qui ne change rien laisse une entrée sans `changes` plutôt qu'un objet
+            // vide : « rien n'a bougé » se lit mieux que « {} ».
+            changes: changes.Count > 0 ? changes : null,
+            ct: ct);
         return Results.Ok(user);
     }
 
@@ -94,7 +126,10 @@ public static class UserEndpoints
         // A deleted user must not be able to mint fresh access tokens from a refresh token they
         // still hold. (Their current access token stays valid until it expires — by design.)
         await refreshTokenRepository.RevokeAllForUserAsync(id, ct);
-        await auditService.RecordAsync(caller.OrgId, "user.deleted", caller.UserId, "user", id, ct: ct);
+        await auditService.RecordAsync(
+            caller.OrgId, "user.deleted", caller.UserId, "user", id,
+            details: new JsonObject { ["email"] = user.Email, ["role"] = user.Role.ToDbString() },
+            ct: ct);
         return Results.NoContent();
     }
 }

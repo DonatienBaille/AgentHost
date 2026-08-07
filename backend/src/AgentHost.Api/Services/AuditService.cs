@@ -19,6 +19,12 @@ public interface IAuditService
         CancellationToken ct = default);
 
     Task<List<AuditLogEntry>> ListByOrgAsync(string orgId, int skip = 0, int take = 100, CancellationToken ct = default);
+
+    /// <summary>Consultation filtrée du journal (feuille de route, lot 3).</summary>
+    Task<AuditPage> SearchAsync(AuditQuery query, CancellationToken ct = default);
+
+    /// <summary>Les valeurs présentes dans le journal, pour construire les filtres de l'IHM.</summary>
+    Task<AuditFacets> GetFacetsAsync(string orgId, CancellationToken ct = default);
 }
 
 /// <summary>Write-once, read-many audit trail service (spec section 2.1 "Audit WORM (non-suppressible)").</summary>
@@ -61,4 +67,10 @@ public class AuditService : IAuditService
 
     public Task<List<AuditLogEntry>> ListByOrgAsync(string orgId, int skip = 0, int take = 100, CancellationToken ct = default) =>
         _repository.ListByOrgAsync(orgId, skip, take, ct);
+
+    public Task<AuditPage> SearchAsync(AuditQuery query, CancellationToken ct = default) =>
+        _repository.SearchAsync(query, ct);
+
+    public Task<AuditFacets> GetFacetsAsync(string orgId, CancellationToken ct = default) =>
+        _repository.GetFacetsAsync(orgId, ct);
 }
