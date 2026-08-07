@@ -1,3 +1,4 @@
+using AgentHost.Api.Domain;
 using AgentHost.Api.Contracts;
 using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Repositories;
@@ -27,6 +28,7 @@ public static class RunEndpoints
             .RequireAuthorization(AuthorizationPolicies.Developer);
         runsApi.MapPost("/{id}/cancel", CancelRun).WithName("CancelRun")
             .RequireAuthorization(AuthorizationPolicies.Developer);
+        runsApi.MapGet("/{id}/tree", GetRunTree).WithName("GetRunTree");
         runsApi.MapGet("/{id}/events", GetRunEvents).WithName("GetRunEvents");
         runsApi.MapGet("/{id}/logs", GetRunLogs).WithName("GetRunLogs");
 
@@ -133,6 +135,68 @@ public static class RunEndpoints
                 containerStopConfirmed = false,
                 detail = result.Detail,
             });
+    }
+
+    /// <summary>
+    /// L'arbre de chaînage auquel ce run appartient (feuille de route, lot 4).
+    ///
+    /// <b>Depuis n'importe lequel de ses membres, et pas seulement depuis la racine.</b> On arrive
+    /// sur un run parce qu'il a échoué ou qu'il a coûté cher ; savoir qu'il fait partie d'une
+    /// cascade, et laquelle, est justement ce qu'on cherche à ce moment-là. Exiger la racine
+    /// obligerait à la connaître déjà.
+    ///
+    /// L'arbre entier se lit en une requête grâce à <c>root_run_id</c>, porté par tous les
+    /// descendants ; il est ensuite recomposé en mémoire, ce qui est trivial pour quelques dizaines
+    /// de nœuds et évite une CTE récursive.
+    /// </summary>
+    private static async Task<IResult> GetRunTree(
+        string id, IRunRepository runRepository, IAgentRepository agentRepository,
+        ICallerContext caller, CancellationToken ct)
+    {
+        var run = await runRepository.GetAsync(id, caller.OrgId, ct);
+        if (run is null) return Results.NotFound();
+
+        var rootId = run.RootRunId ?? run.Id;
+        var runs = await runRepository.GetChainTreeAsync(rootId, caller.OrgId, ct);
+        if (runs.Count == 0) return Results.NotFound();
+
+        // Les noms d'agent en un seul aller-retour : une cascade fait vite trente nœuds, et un
+        // appel par nœud serait le cas d'école du N+1.
+        var agents = await agentRepository.ListByOrgAsync(caller.OrgId, ct);
+        var agentNames = agents.ToDictionary(a => a.Id, a => a.Name);
+
+        var nodes = runs.ToDictionary(r => r.Id, r => new RunTreeNode
+        {
+            Id = r.Id,
+            Number = r.Number,
+            AgentId = r.AgentId,
+            AgentName = agentNames.TryGetValue(r.AgentId, out var name) ? name : null,
+            Status = r.Status.ToDbString(),
+            TriggeredByType = r.TriggeredByType.ToDbString(),
+            ParentRunId = r.ParentRunId,
+            ChainDepth = r.ChainDepth,
+            BudgetUsedUsd = r.BudgetUsedUsd,
+            DurationMs = r.DurationMs,
+            CreatedAt = r.CreatedAt,
+        });
+
+        foreach (var node in nodes.Values)
+        {
+            // Un parent absent de l'ensemble ne peut arriver que si sa ligne a été supprimée : on
+            // laisse alors l'enfant orphelin plutôt que de perdre le nœud, sinon la lecture de
+            // l'arbre masquerait des runs qui existent bel et bien.
+            if (node.ParentRunId is not null && nodes.TryGetValue(node.ParentRunId, out var parent))
+                parent.Children.Add(node);
+        }
+
+        return Results.Ok(new RunTreeResponse
+        {
+            RootRunId = rootId,
+            Root = nodes.GetValueOrDefault(rootId),
+            TotalRuns = runs.Count,
+            TotalBudgetUsedUsd = runs.Sum(r => r.BudgetUsedUsd ?? 0m),
+            MaxDepth = runs.Max(r => r.ChainDepth),
+        });
     }
 
     private static async Task<IResult> GetRunEvents(

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Nodes;
 using AgentHost.Api.Contracts;
 using AgentHost.Api.Domain;
 using AgentHost.Api.Infrastructure;
@@ -36,6 +37,7 @@ public static class AgentProtocolEndpoints
         agentApi.MapGet("/runs/{runId}/approvals/{approvalId}", GetApprovalStatus).WithName("AgentGetApprovalStatus");
         agentApi.MapPost("/runs/{runId}/questions", AskQuestion).WithName("AgentAskQuestion");
         agentApi.MapPost("/runs/{runId}/usage", ReportUsage).WithName("AgentReportUsage");
+        agentApi.MapPost("/runs/{runId}/chain", ChainRun).WithName("AgentChainRun");
 
         return app;
     }
@@ -420,6 +422,88 @@ public static class AgentProtocolEndpoints
     /// 403 rather than 404: the token is valid, it is simply not authoritative for this run, and
     /// leaking nothing more than that is the point.
     /// </summary>
+    // ---- POST /api/agent/runs/{runId}/chain ----
+
+    /// <summary>
+    /// Un agent en cours d'exécution en déclenche un autre (feuille de route, lot 4).
+    ///
+    /// <b>Ce qui rend cet endpoint différent des autres du protocole.</b> Les autres écrivent dans
+    /// le run que le jeton désigne ; celui-ci en CRÉE un nouveau, qui consommera du budget. C'est
+    /// la seule opération du protocole qui coûte de l'argent, et la seule qui puisse s'emballer :
+    /// un agent qui se chaîne lui-même est une boucle infinie dont chaque maillon, pris isolément,
+    /// est parfaitement légitime.
+    ///
+    /// Les garde-fous — profondeur, éventail, taille d'arbre, appartenance au même projet — sont
+    /// dans <c>RunService</c> et non ici : ils s'appliquent quel que soit le chemin d'appel, et
+    /// notamment à la création manuelle d'un run avec un <c>parentRunId</c>.
+    ///
+    /// <b>Le jeton n'est pas transitif.</b> Il autorise à chaîner DEPUIS ce run ; il ne devient pas
+    /// un jeton pour l'enfant. L'enfant reçoit le sien, lié à lui seul, comme tout autre run.
+    /// </summary>
+    private static async Task<IResult> ChainRun(
+        string runId,
+        AgentChainRequest req,
+        ClaimsPrincipal principal,
+        IRunRepository runRepository,
+        IRunService runService,
+        IEventBus eventBus,
+        CancellationToken ct)
+    {
+        if (BindRun(runId, principal) is { } denied) return denied;
+
+        if (string.IsNullOrWhiteSpace(req.AgentId))
+            return Results.BadRequest(new { error = "agentId is required" });
+
+        var parent = await runRepository.GetAsync(runId, ct);
+        if (parent is null) return Results.NotFound();
+
+        try
+        {
+            var child = await runService.CreateAsync(new CreateRunRequest
+            {
+                AgentId = req.AgentId,
+                Inputs = req.Inputs,
+                Context = req.Context,
+                BudgetMaxUsd = req.BudgetMaxUsd,
+                TriggeredByType = TriggeredByType.Chain,
+                ParentRunId = runId,
+            }, ct);
+
+            // Tracé dans le flux du PARENT : c'est là que quelqu'un regarde quand il se demande
+            // pourquoi un run en a produit d'autres.
+            await eventBus.PublishAsync(new RunEvent
+            {
+                RunId = runId,
+                EventType = "run.chained",
+                Level = "info",
+                Message = $"Chained run {child.Id}",
+                Payload = new JsonObject { ["childRunId"] = child.Id, ["agentId"] = req.AgentId },
+            }, ct);
+
+            return Results.Accepted($"/api/runs/{child.Id}", new AgentChainResponse
+            {
+                RunId = child.Id,
+                RootRunId = child.RootRunId ?? child.Id,
+                ChainDepth = child.ChainDepth,
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Limite atteinte, agent sans version publiée, budget mensuel épuisé, projet
+            // étranger : la requête est comprise, c'est son effet qui est refusé. 422 et non 500 —
+            // l'agent doit pouvoir traiter ce refus, pas croire à une panne.
+            return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status422UnprocessableEntity);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+    }
+
     private static IResult? BindRun(string runId, ClaimsPrincipal principal)
     {
         var tokenRunId = principal.GetRunId();

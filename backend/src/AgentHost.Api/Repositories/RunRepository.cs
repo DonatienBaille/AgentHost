@@ -34,6 +34,23 @@ public interface IRunRepository
     /// <summary>Total budget consumed by a project's runs created at/after <paramref name="sinceUtc"/> (project monthly budget enforcement).</summary>
     Task<decimal> SumBudgetUsedForProjectSinceAsync(string projectId, DateTime sinceUtc, CancellationToken ct = default);
 
+    /// <summary>
+    /// L'arbre de chaînage complet auquel appartient <paramref name="rootRunId"/>, scopé à
+    /// l'organisation (feuille de route, lot 4).
+    ///
+    /// Une seule condition indexée et aucune CTE récursive : <c>root_run_id</c> est porté par TOUS
+    /// les descendants, pas seulement par les enfants directs, si bien que l'arbre entier tient
+    /// dans <c>root_run_id = @Root OR id = @Root</c>. C'est précisément ce que cette colonne
+    /// existe pour rendre possible.
+    /// </summary>
+    Task<List<Run>> GetChainTreeAsync(string rootRunId, string orgId, CancellationToken ct = default);
+
+    /// <summary>Nombre d'enfants directs d'un run — borne l'éventail d'un seul parent.</summary>
+    Task<int> CountChildrenAsync(string parentRunId, CancellationToken ct = default);
+
+    /// <summary>Nombre total de runs dans l'arbre — borne la taille d'une cascade entière.</summary>
+    Task<int> CountChainTreeAsync(string rootRunId, CancellationToken ct = default);
+
     /// <summary>Non-terminal runs that have actually started — the watchdog's timeout candidates.</summary>
     Task<List<Run>> ListActiveStartedAsync(CancellationToken ct = default);
 
@@ -66,7 +83,7 @@ public class RunRepository : IRunRepository
         status, inputs, context, outputs, workspace_path, runner_url,
         duration_ms, exit_code, error_message, error_code,
         budget_max_usd, budget_used_usd,
-        triggered_by_user_id, triggered_by_type, parent_run_id, root_run_id,
+        triggered_by_user_id, triggered_by_type, parent_run_id, root_run_id, chain_depth,
         created_at, started_at, finished_at, updated_at, deleted_at
         """;
 
@@ -178,14 +195,14 @@ public class RunRepository : IRunRepository
                 status, inputs, context, outputs, workspace_path, runner_url,
                 duration_ms, exit_code, error_message, error_code,
                 budget_max_usd, budget_used_usd,
-                triggered_by_user_id, triggered_by_type, parent_run_id, root_run_id,
+                triggered_by_user_id, triggered_by_type, parent_run_id, root_run_id, chain_depth,
                 created_at, started_at, finished_at, updated_at
             ) VALUES (
                 @Id, @OrgId, @ProjectId, @Number, @AgentId, @AgentVersionId,
                 @Status, @Inputs::jsonb, @Context::jsonb, @Outputs::jsonb, @WorkspacePath, @RunnerUrl,
                 @DurationMs, @ExitCode, @ErrorMessage, @ErrorCode,
                 @BudgetMaxUsd, @BudgetUsedUsd,
-                @TriggeredByUserId, @TriggeredByType, @ParentRunId, @RootRunId,
+                @TriggeredByUserId, @TriggeredByType, @ParentRunId, @RootRunId, @ChainDepth,
                 @CreatedAt, @StartedAt, @FinishedAt, @UpdatedAt
             )
             """;
@@ -193,6 +210,36 @@ public class RunRepository : IRunRepository
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, RunRow.FromDomain(run), cancellationToken: ct));
         _logger.Information("Inserted run {RunId}", run.Id);
+    }
+
+    public async Task<List<Run>> GetChainTreeAsync(string rootRunId, string orgId, CancellationToken ct = default)
+    {
+        var sql = $"""
+            SELECT {SelectColumns} FROM runs
+            WHERE org_id = @OrgId AND deleted_at IS NULL
+              AND (root_run_id = @Root OR id = @Root)
+            ORDER BY created_at
+            """;
+        using var db = _connectionFactory.CreateConnection();
+        var rows = await db.QueryAsync<RunRow>(new CommandDefinition(
+            sql, new { Root = rootRunId, OrgId = orgId }, cancellationToken: ct));
+        return rows.Select(r => r.ToDomain()).ToList();
+    }
+
+    public async Task<int> CountChildrenAsync(string parentRunId, CancellationToken ct = default)
+    {
+        using var db = _connectionFactory.CreateConnection();
+        return await db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM runs WHERE parent_run_id = @Parent AND deleted_at IS NULL",
+            new { Parent = parentRunId }, cancellationToken: ct));
+    }
+
+    public async Task<int> CountChainTreeAsync(string rootRunId, CancellationToken ct = default)
+    {
+        using var db = _connectionFactory.CreateConnection();
+        return await db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM runs WHERE (root_run_id = @Root OR id = @Root) AND deleted_at IS NULL",
+            new { Root = rootRunId }, cancellationToken: ct));
     }
 
     public async Task UpdateAsync(Run run, CancellationToken ct = default)

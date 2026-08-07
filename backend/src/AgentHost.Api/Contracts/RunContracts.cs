@@ -45,3 +45,58 @@ public class RunListQuery
 
     // No OrgId: runs are always listed within the caller's own organization.
 }
+
+/// <summary>
+/// Ce qu'un agent en cours d'exécution demande pour en déclencher un autre (lot 4).
+///
+/// Il n'y a ni <c>parentRunId</c> ni <c>triggeredByType</c> : le parent est le run que le jeton
+/// désigne, et le type est <c>chain</c> par construction. Les laisser passer par le corps
+/// permettrait à un agent de déclarer un autre parent que le sien, donc de rattacher son enfant à
+/// un arbre auquel il n'appartient pas — et d'en contourner les limites au passage.
+/// </summary>
+public class AgentChainRequest
+{
+    public string AgentId { get; set; } = string.Empty;
+    public JsonNode? Inputs { get; set; }
+    public JsonNode? Context { get; set; }
+    public decimal? BudgetMaxUsd { get; set; }
+}
+
+public class AgentChainResponse
+{
+    public string RunId { get; set; } = string.Empty;
+    public string RootRunId { get; set; } = string.Empty;
+    public int ChainDepth { get; set; }
+}
+
+/// <summary>Un nœud de l'arbre de chaînage, servi à l'IHM.</summary>
+public class RunTreeNode
+{
+    public string Id { get; set; } = string.Empty;
+    public long Number { get; set; }
+    public string AgentId { get; set; } = string.Empty;
+    public string? AgentName { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string TriggeredByType { get; set; } = string.Empty;
+    public string? ParentRunId { get; set; }
+    public int ChainDepth { get; set; }
+    public decimal? BudgetUsedUsd { get; set; }
+    public long? DurationMs { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public List<RunTreeNode> Children { get; set; } = [];
+}
+
+/// <summary>
+/// L'arbre complet auquel un run appartient, plus ses totaux.
+///
+/// Les totaux sont servis parce qu'ils sont la question qu'on se pose devant une cascade : ce que
+/// l'ensemble a coûté, pas ce qu'a coûté le maillon qu'on regarde.
+/// </summary>
+public class RunTreeResponse
+{
+    public string RootRunId { get; set; } = string.Empty;
+    public RunTreeNode? Root { get; set; }
+    public int TotalRuns { get; set; }
+    public decimal TotalBudgetUsedUsd { get; set; }
+    public int MaxDepth { get; set; }
+}

@@ -110,6 +110,10 @@ public class RunService : IRunService
         var project = await _projectRepository.GetAsync(projectId, ct)
             ?? throw new KeyNotFoundException($"Project {projectId} not found");
 
+        // Le parent, quand ce run est un maillon de chaîne. Résolu AVANT toute écriture : ses
+        // limites décident si ce run a le droit d'exister.
+        var parent = await ResolveChainParentAsync(req.ParentRunId, agent.ProjectId, ct);
+
         var manifest = _manifestParser.Parse(agent.ManifestYaml);
 
         var now = DateTime.UtcNow;
@@ -132,8 +136,13 @@ public class RunService : IRunService
             BudgetUsedUsd = 0m,
             TriggeredByUserId = CallerUserId,
             TriggeredByType = req.TriggeredByType,
-            ParentRunId = req.ParentRunId,
-            RootRunId = req.ParentRunId, // simplification: root = immediate parent unless chained further
+            ParentRunId = parent?.Id,
+            // La racine du parent, et non le parent lui-même : `root = parent` est juste à la
+            // profondeur 1 et faux ensuite — le petit-enfant aurait eu pour racine son parent, et
+            // l'arbre se serait scindé en deux moitiés que rien ne relie. C'est aussi ce qui rend
+            // la lecture de l'arbre possible en une seule condition indexée.
+            RootRunId = parent is null ? null : parent.RootRunId ?? parent.Id,
+            ChainDepth = parent is null ? 0 : parent.ChainDepth + 1,
             CreatedAt = now,
             UpdatedAt = now,
             RuntimeProfile = new RuntimeProfile
@@ -174,6 +183,57 @@ public class RunService : IRunService
         _ = ExecuteRunInNewScopeAsync(run.Id);
 
         return run;
+    }
+
+    /// <summary>Profondeur maximale d'une chaîne. Au-delà, ce n'est plus un enchaînement, c'est une fuite.</summary>
+    public const int MaxChainDepth = 5;
+
+    /// <summary>Enfants directs qu'un seul run peut lancer.</summary>
+    public const int MaxChainChildren = 10;
+
+    /// <summary>Taille totale d'un arbre de chaînage, toutes branches confondues.</summary>
+    public const int MaxChainTreeSize = 50;
+
+    /// <summary>
+    /// Vérifie qu'un run peut être chaîné à ce parent, et rend le parent.
+    ///
+    /// <b>Les trois limites ne sont pas un raffinement, elles sont le garde-fou.</b> Un agent qui
+    /// se chaîne lui-même est une boucle infinie qui consomme le budget mensuel du projet jusqu'à
+    /// épuisement, sans qu'aucun écran ne s'en alarme — chaque run pris isolément est parfaitement
+    /// légitime. La profondeur borne la récursion, l'éventail borne l'explosion d'un seul niveau,
+    /// et la taille de l'arbre borne la combinaison des deux, qu'aucune des deux premières
+    /// n'attrape (cinq niveaux à dix enfants font cent mille runs).
+    ///
+    /// <b>Le parent doit être dans le même projet.</b> Sans cela, un agent enfermé dans un projet
+    /// pourrait faire dépenser le budget d'un autre — l'isolation s'arrêterait à la porte du
+    /// premier run.
+    /// </summary>
+    private async Task<Run?> ResolveChainParentAsync(string? parentRunId, string projectId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(parentRunId)) return null;
+
+        var parent = await _runRepository.GetAsync(parentRunId, ct)
+            ?? throw new KeyNotFoundException($"Parent run {parentRunId} not found");
+
+        if (parent.ProjectId != projectId)
+            throw new InvalidOperationException("A chained run must target an agent of the parent's project");
+
+        if (parent.ChainDepth + 1 > MaxChainDepth)
+            throw new InvalidOperationException(
+                $"Chain depth limit reached ({MaxChainDepth}); this run cannot spawn another");
+
+        var children = await _runRepository.CountChildrenAsync(parent.Id, ct);
+        if (children >= MaxChainChildren)
+            throw new InvalidOperationException(
+                $"Run {parent.Id} already spawned {children} children (limit {MaxChainChildren})");
+
+        var rootId = parent.RootRunId ?? parent.Id;
+        var treeSize = await _runRepository.CountChainTreeAsync(rootId, ct);
+        if (treeSize >= MaxChainTreeSize)
+            throw new InvalidOperationException(
+                $"Chain tree {rootId} already holds {treeSize} runs (limit {MaxChainTreeSize})");
+
+        return parent;
     }
 
     /// <summary>

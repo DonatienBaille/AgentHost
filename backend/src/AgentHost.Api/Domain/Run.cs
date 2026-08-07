@@ -47,6 +47,15 @@ public class Run
     public string? ParentRunId { get; set; }
     public string? RootRunId { get; set; }
 
+    /// <summary>
+    /// Profondeur dans l'arbre de chaînage : 0 pour un run lancé directement, parent + 1 sinon.
+    ///
+    /// Écrite à la création plutôt que recalculée : la seule chose qu'on en fait est de borner la
+    /// récursion, et remonter la chaîne par une CTE récursive à chaque chaînage pour retrouver un
+    /// nombre que le parent connaît déjà serait un coût pur.
+    /// </summary>
+    public int ChainDepth { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? FinishedAt { get; set; }

@@ -56,6 +56,7 @@ internal sealed class RunRow
 
     public string? ParentRunId { get; set; }
     public string? RootRunId { get; set; }
+    public int ChainDepth { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime? StartedAt { get; set; }
@@ -87,6 +88,7 @@ internal sealed class RunRow
         TriggeredByType = run.TriggeredByType.ToDbString(),
         ParentRunId = run.ParentRunId,
         RootRunId = run.RootRunId,
+        ChainDepth = run.ChainDepth,
         CreatedAt = run.CreatedAt,
         StartedAt = run.StartedAt,
         FinishedAt = run.FinishedAt,
@@ -120,6 +122,7 @@ internal sealed class RunRow
             : TriggeredByTypeExtensions.FromDbString(TriggeredByType),
         ParentRunId = ParentRunId,
         RootRunId = RootRunId,
+        ChainDepth = ChainDepth,
         CreatedAt = CreatedAt,
         StartedAt = StartedAt,
         FinishedAt = FinishedAt,
