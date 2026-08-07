@@ -59,7 +59,7 @@ public class RemoteContainerOrchestratorTests
             services.AddSingleton(Events.Object);
             services.AddSingleton<ILogger>(Serilog.Core.Logger.None);
             services.AddSingleton<RunStateMachine>(_ =>
-                new RunStateMachine(Runs.Object, Events.Object, Webhooks.Object, Serilog.Core.Logger.None));
+                new RunStateMachine(Runs.Object, Events.Object, Webhooks.Object, Serilog.Core.Logger.None, TestMetrics.Create()));
             var provider = services.BuildServiceProvider();
 
             var stateMachine = provider.GetRequiredService<RunStateMachine>();

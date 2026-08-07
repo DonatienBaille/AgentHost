@@ -4,6 +4,8 @@ using AgentHost.Api.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 
+using AgentHost.Api.Infrastructure;
+
 namespace AgentHost.Api.Services;
 
 /// <summary>
@@ -18,6 +20,7 @@ namespace AgentHost.Api.Services;
 /// </summary>
 public class RunStateMachine
 {
+    private readonly AgentHostMetrics _metrics;
     private readonly IRunRepository _runRepository;
     private readonly IEventBus _eventBus;
     private readonly IWebhookDispatcher _webhookDispatcher;
@@ -36,8 +39,10 @@ public class RunStateMachine
         IEventBus eventBus,
         IWebhookDispatcher webhookDispatcher,
         ILogger logger,
+        AgentHostMetrics metrics,
         IServiceScopeFactory? scopeFactory = null)
     {
+        _metrics = metrics;
         _runRepository = runRepository;
         _eventBus = eventBus;
         _webhookDispatcher = webhookDispatcher;
@@ -83,6 +88,10 @@ public class RunStateMachine
             await _webhookDispatcher.DispatchAsync(run.ProjectId, "run.finished", payload, ct);
 
             await RecordRunHistoryAsync(run, newStatus, reason, ct);
+
+            // Après l'écriture et l'historique : la métrique décrit ce qui s'est produit, elle ne
+            // doit pas être émise pour une transition que la base aurait refusée.
+            _metrics.RunFinished(run, newStatus);
         }
     }
 

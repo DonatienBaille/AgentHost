@@ -160,6 +160,7 @@ else
 builder.Services.AddSingleton<RunCompletionRecorder>();
 builder.Services.AddScoped<IEventBus, SignalREventBus>();
 builder.Services.AddScoped<RunStateMachine>();
+builder.Services.AddSingleton<AgentHostMetrics>();
 builder.Services.AddScoped<ISecretsBroker, SecretsBroker>();
 builder.Services.AddScoped<ISecretsRekeyService, SecretsRekeyService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
@@ -411,6 +412,7 @@ builder.Services.AddOpenTelemetry()
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
         .AddRuntimeInstrumentation()
+        .AddMeter(AgentHostMetrics.MeterName)
         .AddMeter("Npgsql")
         .AddPrometheusExporter())
     .WithTracing(tracing =>
@@ -504,6 +506,7 @@ app.MapWebhookEndpoints();
 app.MapOrganizationEndpoints();
 app.MapUserEndpoints();
 app.MapAuditEndpoints();
+app.MapMetricsEndpoints();
 app.MapSecretEndpoints();
 
 // ---- Health probes ----

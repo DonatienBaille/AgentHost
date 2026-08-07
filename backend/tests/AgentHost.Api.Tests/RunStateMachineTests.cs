@@ -24,7 +24,7 @@ public class RunStateMachineTests
         webhookDispatcher.Setup(w => w.DispatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        return new RunStateMachine(runRepo.Object, eventBus.Object, webhookDispatcher.Object, Serilog.Log.Logger);
+        return new RunStateMachine(runRepo.Object, eventBus.Object, webhookDispatcher.Object, Serilog.Log.Logger, TestMetrics.Create());
     }
 
     private static Run NewRun(RunStatus status) => new()

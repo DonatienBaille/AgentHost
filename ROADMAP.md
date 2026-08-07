@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-388 tests backend, 596 tests frontend, 12 tests end-to-end Playwright, build sans warning.
+398 tests backend, 596 tests frontend, 12 tests end-to-end Playwright, build sans warning.
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
 contient** concrètement, et **à quoi on reconnaît qu'il est fini**. L'ordre est un défaut
@@ -208,7 +208,7 @@ les cas non représentables sont signalés explicitement.
 
 ---
 
-## Lot 3 — Monitoring : OTEL en sortie, UI dans l'IHM
+## Lot 3 — Monitoring : OTEL en sortie, UI dans l'IHM 🔶 backend fait, IHM à faire
 
 **Pourquoi.** L'instrumentation OpenTelemetry existe (traces, métriques, endpoint `/metrics`
 Prometheus, export OTLP configurable), mais elle n'est exploitable qu'avec un Grafana ou équivalent
@@ -217,6 +217,29 @@ ses agents depuis l'IHM.
 
 **Principe directeur.** OTEL reste le canal d'exposition propre et complet — on n'invente pas un
 système de métriques parallèle. L'IHM consomme un sous-ensemble agrégé, servi par l'API.
+
+**Livré côté backend.** `Infrastructure/AgentHostMetrics.cs` ajoute les instruments **métier** qui
+manquaient — l'instrumentation existante était purement technique (ASP.NET Core, HTTP, runtime,
+Npgsql) et ne répondait qu'à « le service est-il en bonne santé » : durée de run, issue ventilée par
+statut, coût cumulé, attente d'approbation, budgets épuisés, erreurs d'infrastructure, profondeur de
+la file. Émis depuis `RunStateMachine` à chaque transition terminale, exposés par le Meter
+`AgentHost.Business` sur `/metrics` et OTLP comme le reste.
+
+La cardinalité est le piège de ce fichier et il est traité : étiquettes bornées par la taille de
+l'installation (organisation, projet, agent, statut), **jamais** d'identifiant de run ou
+d'utilisateur — un run est un événement, pas une dimension.
+
+`Endpoints/MetricsEndpoints.cs` sert à l'IHM quatre agrégats scopés par le JWT : vue d'ensemble,
+par agent, par projet, et série quotidienne. La source est `runs` et non les compteurs OTEL, parce
+qu'une série Prometheus ne sait pas répondre « MES agents » sans donner accès à celles des autres,
+et parce que l'attribution fine par utilisateur est justement ce que les étiquettes évitent. Les
+deux canaux sont complémentaires, pas redondants.
+
+10 tests d'intégration contre la vraie base — du SQL ne se vérifie pas à la lecture. Vérifié en
+introduisant une fuite inter-organisation : 4 tests virent au rouge, dont celui qui existe pour ça.
+
+**Reste à faire : tout le tableau de bord dans l'IHM**, les alertes visibles, et le journal d'audit
+filtrable. Les données sont servies ; rien ne les affiche encore.
 
 **Contenu.**
 
