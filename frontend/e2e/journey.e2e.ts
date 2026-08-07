@@ -192,3 +192,86 @@ test.describe('supervision', () => {
     await expect(page.getByText(/7 derniers jours/)).toBeVisible({ timeout: 20_000 });
   });
 });
+
+/**
+ * Le journal d'audit consultable (lot 3), contre la vraie API.
+ *
+ * Ce que les tests de composants ne peuvent pas attraper : que les filtres arrivent réellement
+ * jusqu'au SQL, que les facettes reflètent ce que le journal contient, et que l'acteur soit résolu
+ * en nom par la jointure serveur. Tout cela est stubbé en test unitaire.
+ *
+ * Le parcours crée un utilisateur, parce que c'est l'un des rares gestes de l'IHM qui écrive dans
+ * le journal — et le seul dont la trace porte à la fois un acteur, une ressource et une charge
+ * `details`.
+ */
+test.describe('journal d’audit', () => {
+  /** Crée un utilisateur depuis la page d'administration ; renvoie son adresse. */
+  async function createUser(page: Page, slug: string): Promise<string> {
+    const email = `${slug}@example.com`;
+    await page.goto('/admin/users');
+    await page.getByTestId('new-user').click();
+
+    await page.locator('#u-email').fill(email);
+    await page.locator('#u-password').fill('correct-horse-battery-staple');
+    await page.locator('#u-display-name').fill(`User ${slug}`);
+    await page.getByRole('button', { name: 'Créer', exact: true }).click();
+
+    await expect(page.getByText(email)).toBeVisible({ timeout: 20_000 });
+    return email;
+  }
+
+  test('a fresh organization sees an empty log, not a broken page', async ({ page }) => {
+    await register(page);
+    await page.goto('/admin/audit-log');
+
+    await expect(page.getByTestId('audit-empty')).toBeVisible({ timeout: 20_000 });
+    // Zéro entrée : la pagination doit être inerte des deux côtés, pas absente.
+    await expect(page.getByTestId('prev-page')).toBeDisabled();
+    await expect(page.getByTestId('next-page')).toBeDisabled();
+  });
+
+  test('an action leaves a trace naming its actor and carrying its payload', async ({ page }) => {
+    const owner = await register(page);
+    const member = await createUser(page, unique('member'));
+
+    await page.goto('/admin/audit-log');
+
+    const row = page.getByTestId('audit-row');
+    await expect(row).toHaveCount(1, { timeout: 20_000 });
+    await expect(row).toContainText('user.created');
+    // L'acteur est résolu par la jointure serveur : la table ne stocke qu'un ULID, et c'est
+    // l'adresse du compte connecté qui doit se retrouver ici.
+    await expect(page.getByTestId('actor-link')).toHaveAttribute('title', owner.email);
+
+    // La charge `details` n'entre dans le DOM qu'une fois la ligne dépliée.
+    await expect(page.getByTestId('detail-details')).toHaveCount(0);
+    await page.getByTestId('toggle-detail').click();
+    // `details` porte l'identité de la CIBLE, que rien d'autre ne résout : la jointure de la
+    // consultation ne remonte que l'acteur.
+    await expect(page.getByTestId('detail-details')).toContainText(member);
+  });
+
+  test('the filters reach the server and narrow the log', async ({ page }) => {
+    await register(page);
+    await createUser(page, unique('member'));
+    await page.goto('/admin/audit-log');
+    await expect(page.getByTestId('audit-row')).toHaveCount(1, { timeout: 20_000 });
+
+    // Les choix proposés viennent des facettes : « user.created » ne peut y figurer que parce
+    // que le serveur l'a rapporté, avec son volume.
+    await page.getByTestId('filter-action').selectOption('user.created');
+    await page.getByTestId('apply-filters').click();
+    await expect(page.getByTestId('audit-row')).toHaveCount(1);
+
+    // Une période antérieure à toute activité : le journal doit dire « aucun résultat », et non
+    // « journal vide » — la nuance est ce qui distingue un filtre trop étroit d'un journal vierge.
+    await page.getByTestId('filter-from').fill('2020-01-01');
+    await page.getByTestId('filter-to').fill('2020-01-02');
+    await page.getByTestId('apply-filters').click();
+    await expect(page.getByTestId('audit-no-results')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('audit-empty')).toHaveCount(0);
+
+    await page.getByTestId('reset-filters').click();
+    await expect(page.getByTestId('audit-row')).toHaveCount(1);
+  });
+});

@@ -11,7 +11,10 @@ import {
   Agent,
   AgentVersion,
   Approval,
+  AuditEntryView,
+  AuditFacets,
   AuditLogEntry,
+  AuditPage,
   ManifestValidationError,
   ManifestValidationFailure,
   ManifestValidationSuccess,
@@ -244,6 +247,52 @@ export function auditEntry(overrides: Partial<AuditLogEntry> = {}): AuditLogEntr
     changes: null,
     details: null,
     createdAt: T0,
+    ...overrides,
+  };
+}
+
+/**
+ * Une entrée telle que la consultation filtrée la sert : sans `orgId` (le périmètre vient du
+ * jeton) et avec l'acteur déjà résolu par le serveur.
+ */
+export function auditEntryView(overrides: Partial<AuditEntryView> = {}): AuditEntryView {
+  return {
+    id: 'a1',
+    action: 'run.created',
+    actorUserId: 'u1',
+    actorEmail: 'alice@example.com',
+    actorDisplayName: 'Alice',
+    resourceType: 'run',
+    resourceId: 'r1',
+    changes: null,
+    details: null,
+    createdAt: T0,
+    ...overrides,
+  };
+}
+
+export function auditFacets(overrides: Partial<AuditFacets> = {}): AuditFacets {
+  return {
+    actions: [
+      { value: 'run.created', count: 3 },
+      { value: 'secret.rotated', count: 1 },
+    ],
+    resourceTypes: [{ value: 'run', count: 3 }],
+    actors: [{ userId: 'u1', email: 'alice@example.com', displayName: 'Alice', count: 4 }],
+    earliestEntry: T0,
+    totalEntries: 4,
+    ...overrides,
+  };
+}
+
+/** Une page de journal, avec un total cohérent par défaut. */
+export function auditPage(overrides: Partial<AuditPage> = {}): AuditPage {
+  const items = overrides.items ?? [auditEntryView()];
+  return {
+    items,
+    total: items.length,
+    skip: 0,
+    take: 50,
     ...overrides,
   };
 }

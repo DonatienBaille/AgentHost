@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-411 tests backend, 724 tests frontend, 15 tests end-to-end Playwright, build sans warning.
+433 tests backend, 745 tests frontend, 18 tests end-to-end Playwright, build sans warning.
 (Chiffres mesurés en exécutant les trois suites après fusion, pas déduits.)
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
@@ -281,8 +281,39 @@ Aucune dépendance de graphique : trente barres CSS coûtent moins qu'une biblio
 aussi bien. Les barres sont mises à l'échelle du jour le plus chargé, et un jour à zéro garde une
 barre d'un pixel pour se distinguer d'une absence de donnée.
 
-**Reste à faire dans ce lot** : le journal d'audit reste une table brute paginée — il devrait être
-filtrable par action, acteur et période.
+**Livré : le journal d'audit devient consultable.** Il était servi par `WHERE org_id = ? ORDER BY
+created_at DESC LIMIT ? OFFSET ?` : techniquement complet, pratiquement inutilisable. On ne consulte
+pas un journal d'audit par curiosité — on l'ouvre parce que quelque chose s'est produit, et la
+question a toujours la même forme : « qui a fait quoi, sur quoi, entre quand et quand ».
+
+- **Filtres SQL** sur action, acteur, type et identifiant de ressource, et période. Le `WHERE` est
+  construit à partir des seuls prédicats demandés plutôt qu'écrit en `(@X IS NULL OR col = @X)`,
+  forme qui tient en une constante mais que le planificateur ne sait pas indexer.
+- **Un total du jeu filtré**, par `COUNT(*) OVER()` donc dans la même lecture que la page. Sans lui
+  la pagination ne peut ni annoncer « 1–50 sur 812 » ni savoir qu'elle est au bout.
+- **Des facettes** (`/audit-log/facets`) : les actions, types et acteurs réellement présents, avec
+  leur volume. Les actions sont un vocabulaire fermé côté serveur mais nulle part documenté côté
+  client ; un champ libre obligerait à en deviner l'orthographe, et une faute de frappe rendrait un
+  journal vide qu'on lirait comme « il ne s'est rien passé ».
+- **L'acteur est nommé**, joint à `users` côté serveur. La table ne stocke qu'un ULID, que la page
+  affichait tel quel. La jointure ignore délibérément `deleted_at` : un compte supprimé est
+  justement l'acteur qu'on cherche à identifier.
+- **`changes` et `details` sont enfin alimentés.** Les colonnes existaient depuis l'origine et
+  personne n'y écrivait : le journal savait dire qu'un compte avait été modifié, jamais en quoi.
+  `user.updated` porte le rôle avant/après, `user.created`/`user.deleted` l'adresse et le rôle de la
+  cible. Le mot de passe n'y figure que comme « rotated ».
+- **Migration 0010** : les index qui rendent ces filtres tenables, tous terminés par
+  `created_at DESC` — le seul ordre dans lequel ce journal se lit.
+- **Côté IHM** : barre de filtres alimentée par les facettes, pagination située dans le total,
+  rebond d'une ligne vers tout ce que son acteur a fait ou vers l'historique complet d'un objet, et
+  charges JSONB affichées au dépliement d'une ligne seulement. « Aucun résultat » et « journal
+  vide » sont distingués : la première invite à élargir le filtre, la seconde dit qu'il n'y a rien à
+  chercher.
+
+22 tests d'intégration contre la vraie base, 29 tests de composant, 12 tests de service, 3 parcours
+Playwright. Vérifié en sabotant le prédicat d'organisation, la borne haute de période et la
+jointure d'acteur : 16 des 22 tests backend virent au rouge. Idem côté IHM sur la conversion de
+borne, la remise à la première page et la barrière de rôle : 5 tests virent au rouge.
 
 **Contenu.**
 
@@ -302,7 +333,8 @@ filtrable par action, acteur et période.
   table brute paginée).
 
 **Fini quand.** Un owner répond depuis l'IHM, sans outil externe : « combien m'ont coûté mes agents
-ce mois-ci, lesquels échouent, et vais-je dépasser mon budget ? »
+ce mois-ci, lesquels échouent, et vais-je dépasser mon budget ? » — et un mainteneur retrouve « qui
+a changé ce rôle, et quand » sans feuilleter.
 
 ---
 

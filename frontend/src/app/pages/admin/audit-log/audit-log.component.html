@@ -1,7 +1,19 @@
 <!-- src/app/pages/admin/audit-log/audit-log.component.html -->
 
 <div class="p-6 max-w-6xl mx-auto">
-  <h1 class="text-3xl font-bold mb-8">{{ 'adminAudit.title' | translate }}</h1>
+  <div class="flex items-center justify-between mb-8">
+    <h1 class="text-3xl font-bold">{{ 'adminAudit.title' | translate }}</h1>
+    @if (canView()) {
+      <button
+        type="button"
+        data-testid="audit-refresh"
+        class="px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 hover:bg-gray-700 transition"
+        (click)="refresh()"
+      >
+        {{ 'common.refresh' | translate }}
+      </button>
+    }
+  </div>
 
   @if (!canView()) {
     <div data-testid="audit-forbidden" class="bg-gray-800 border border-gray-700 rounded-lg p-4">
@@ -15,44 +27,249 @@
     </div>
   }
 
-  @if (isLoading()) {
-    <div class="flex justify-center py-8">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-    </div>
-  }
-
   @if (canView()) {
-  <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead>
-        <tr class="text-left text-gray-400 border-b border-gray-700">
-          <th class="px-4 py-2">{{ 'adminAudit.action' | translate }}</th>
-          <th class="px-4 py-2">{{ 'adminAudit.actor' | translate }}</th>
-          <th class="px-4 py-2">{{ 'adminAudit.resource' | translate }}</th>
-          <th class="px-4 py-2">{{ 'adminAudit.timestamp' | translate }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (entry of entries(); track entry.id) {
-          <tr data-testid="audit-row" class="border-b border-gray-700 last:border-0">
-            <td class="px-4 py-2 font-mono text-xs">{{ entry.action }}</td>
-            <td class="px-4 py-2 text-gray-400">{{ entry.actorUserId || '—' }}</td>
-            <td class="px-4 py-2 text-gray-400">
-              @if (entry.resourceType) {
-                {{ entry.resourceType }}:{{ entry.resourceId }}
-              } @else {
-                —
-              }
-            </td>
-            <td class="px-4 py-2 text-gray-500">{{ entry.createdAt | date: 'medium' }}</td>
-          </tr>
-        }
-      </tbody>
-    </table>
+    <!-- Barre de filtres. Les valeurs proposées viennent des facettes du serveur : on n'offre que
+         ce que ce journal contient réellement, avec le nombre d'entrées derrière chaque choix. -->
+    <form
+      [formGroup]="filterForm"
+      (ngSubmit)="applyFilters()"
+      data-testid="audit-filters"
+      class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6"
+    >
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="f-action">{{ 'adminAudit.action' | translate }}</label>
+          <select
+            id="f-action"
+            data-testid="filter-action"
+            formControlName="action"
+            class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+          >
+            <option value="">{{ 'adminAudit.allActions' | translate }}</option>
+            @for (a of facets()?.actions ?? []; track a.value) {
+              <option [value]="a.value">{{ a.value }} ({{ a.count }})</option>
+            }
+          </select>
+        </div>
 
-    @if (!isLoading() && entries().length === 0) {
-      <p data-testid="audit-empty" class="text-gray-500 text-sm p-4">{{ 'adminAudit.empty' | translate }}</p>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="f-actor">{{ 'adminAudit.actor' | translate }}</label>
+          <select
+            id="f-actor"
+            data-testid="filter-actor"
+            formControlName="actorUserId"
+            class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+          >
+            <option value="">{{ 'adminAudit.allActors' | translate }}</option>
+            @for (actor of facets()?.actors ?? []; track actor.userId) {
+              <option [value]="actor.userId">{{ actorFacetLabel(actor) }} ({{ actor.count }})</option>
+            }
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="f-type">{{ 'adminAudit.resourceType' | translate }}</label>
+          <select
+            id="f-type"
+            data-testid="filter-resource-type"
+            formControlName="resourceType"
+            class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+          >
+            <option value="">{{ 'adminAudit.allResourceTypes' | translate }}</option>
+            @for (t of facets()?.resourceTypes ?? []; track t.value) {
+              <option [value]="t.value">{{ t.value }} ({{ t.count }})</option>
+            }
+          </select>
+        </div>
+
+        <!-- Deux bornes inclusives : « du 3 au 5 » contient le 5. La conversion vers la borne
+             haute exclue de l'API se fait dans le service, pas dans la tête de l'utilisateur. -->
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="f-from">{{ 'adminAudit.from' | translate }}</label>
+          <input
+            id="f-from"
+            type="date"
+            data-testid="filter-from"
+            formControlName="from"
+            class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+          />
+        </div>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="f-to">{{ 'adminAudit.to' | translate }}</label>
+          <input
+            id="f-to"
+            type="date"
+            data-testid="filter-to"
+            formControlName="to"
+            class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
+          />
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 mt-4">
+        <button
+          type="submit"
+          data-testid="apply-filters"
+          class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium transition"
+        >
+          {{ 'adminAudit.apply' | translate }}
+        </button>
+        @if (hasFilters()) {
+          <button
+            type="button"
+            data-testid="reset-filters"
+            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm transition"
+            (click)="resetFilters()"
+          >
+            {{ 'adminAudit.reset' | translate }}
+          </button>
+        }
+        @if (facets(); as f) {
+          <span data-testid="facets-total" class="text-xs text-gray-500 ml-auto">
+            {{ 'adminAudit.facetsTotal' | translate: { count: f.totalEntries } }}
+          </span>
+        }
+      </div>
+    </form>
+
+    <!-- Le total du jeu filtré, et où l'on se trouve dedans. Sans lui, la pagination navigue à
+         l'aveugle : rien ne dirait qu'il reste des pages, ni combien. -->
+    <div class="flex items-center justify-between mb-3 text-sm text-gray-400">
+      <span data-testid="audit-range">
+        {{ 'adminAudit.range' | translate: { start: rangeStart(), end: rangeEnd(), total: total() } }}
+      </span>
+      <span class="flex items-center gap-2">
+        <button
+          type="button"
+          data-testid="prev-page"
+          class="px-3 py-1 rounded bg-gray-800 border border-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-700 transition"
+          [disabled]="skip() === 0"
+          (click)="previousPage()"
+        >
+          {{ 'adminAudit.previous' | translate }}
+        </button>
+        <button
+          type="button"
+          data-testid="next-page"
+          class="px-3 py-1 rounded bg-gray-800 border border-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-700 transition"
+          [disabled]="!hasMore()"
+          (click)="nextPage()"
+        >
+          {{ 'adminAudit.next' | translate }}
+        </button>
+      </span>
+    </div>
+
+    @if (isLoading()) {
+      <div class="flex justify-center py-8">
+        <div data-testid="audit-spinner" class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      </div>
     }
-  </div>
+
+    <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-gray-400 border-b border-gray-700">
+            <th class="px-4 py-2">{{ 'adminAudit.action' | translate }}</th>
+            <th class="px-4 py-2">{{ 'adminAudit.actor' | translate }}</th>
+            <th class="px-4 py-2">{{ 'adminAudit.resource' | translate }}</th>
+            <th class="px-4 py-2">{{ 'adminAudit.timestamp' | translate }}</th>
+            <th class="px-4 py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (entry of entries(); track entry.id) {
+            <tr data-testid="audit-row" class="border-b border-gray-700 last:border-0">
+              <td class="px-4 py-2 font-mono text-xs">{{ entry.action }}</td>
+              <td class="px-4 py-2 text-gray-400">
+                @if (entry.actorUserId) {
+                  <!-- Rebondir vers tout ce que cette personne a fait : c'est la question qui
+                       suit immédiatement la lecture d'une ligne. -->
+                  <button
+                    type="button"
+                    data-testid="actor-link"
+                    class="text-blue-400 hover:text-blue-300 underline decoration-dotted"
+                    [attr.title]="entry.actorEmail ?? entry.actorUserId"
+                    (click)="filterByActor(entry)"
+                  >
+                    {{ actorLabel(entry) }}
+                  </button>
+                } @else {
+                  <span data-testid="actor-system">—</span>
+                }
+              </td>
+              <td class="px-4 py-2 text-gray-400">
+                @if (entry.resourceType) {
+                  <button
+                    type="button"
+                    data-testid="resource-link"
+                    class="text-blue-400 hover:text-blue-300 underline decoration-dotted"
+                    (click)="filterByResource(entry)"
+                  >
+                    {{ entry.resourceType }}@if (entry.resourceId) {<span>:{{ entry.resourceId }}</span>}
+                  </button>
+                } @else {
+                  —
+                }
+              </td>
+              <td class="px-4 py-2 text-gray-500">{{ entry.createdAt | date: 'medium' }}</td>
+              <td class="px-4 py-2 text-right">
+                @if (hasPayload(entry)) {
+                  <button
+                    type="button"
+                    data-testid="toggle-detail"
+                    class="text-xs text-blue-400 hover:text-blue-300"
+                    [attr.aria-expanded]="expandedId() === entry.id"
+                    (click)="toggleDetail(entry)"
+                  >
+                    {{ (expandedId() === entry.id ? 'adminAudit.collapse' : 'adminAudit.expand') | translate }}
+                  </button>
+                }
+              </td>
+            </tr>
+
+            <!-- Les charges JSONB ne sont rendues qu'ici, une fois la ligne dépliée : le tableau
+                 reste lisible, et rien de leur contenu n'entre dans le DOM sans être demandé. -->
+            @if (expandedId() === entry.id) {
+              <tr data-testid="audit-detail" class="border-b border-gray-700 bg-gray-900/60">
+                <td colspan="5" class="px-4 py-3">
+                  <div class="grid gap-4 sm:grid-cols-2">
+                    @if (entry.changes !== null) {
+                      <div>
+                        <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                          {{ 'adminAudit.changes' | translate }}
+                        </div>
+                        <pre data-testid="detail-changes" class="text-xs font-mono whitespace-pre-wrap break-all text-gray-300">{{ pretty(entry.changes) }}</pre>
+                      </div>
+                    }
+                    @if (entry.details !== null) {
+                      <div>
+                        <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                          {{ 'adminAudit.details' | translate }}
+                        </div>
+                        <pre data-testid="detail-details" class="text-xs font-mono whitespace-pre-wrap break-all text-gray-300">{{ pretty(entry.details) }}</pre>
+                      </div>
+                    }
+                  </div>
+                </td>
+              </tr>
+            }
+          }
+        </tbody>
+      </table>
+
+      @if (!isLoading() && entries().length === 0) {
+        @if (hasFilters()) {
+          <!-- Distinguer les deux : « aucun résultat » invite à élargir le filtre, « journal
+               vide » dit qu'il n'y a rien à chercher. Les confondre ferait douter du filtre. -->
+          <p data-testid="audit-no-results" class="text-gray-500 text-sm p-4">
+            {{ 'adminAudit.noResults' | translate }}
+          </p>
+        } @else {
+          <p data-testid="audit-empty" class="text-gray-500 text-sm p-4">{{ 'adminAudit.empty' | translate }}</p>
+        }
+      }
+    </div>
   }
 </div>
