@@ -6,6 +6,22 @@ using Serilog;
 namespace AgentHost.Runner;
 
 /// <summary>
+/// Ce que l'API du runner attend de son superviseur. L'interface existe pour une raison précise :
+/// permettre aux tests d'héberger la <b>vraie</b> API du runner — filtre d'authentification, codes
+/// de statut, formes JSON comprises — devant un superviseur simulé, plutôt que de tester une
+/// imitation de runner écrite pour l'occasion. Aucun démon de conteneurs n'existe dans
+/// l'environnement de test, et c'est la seule façon d'y couvrir le protocole réel.
+/// </summary>
+public interface IRunSupervisor
+{
+    Task<string> LaunchAsync(AgentLaunchSpec spec, CancellationToken ct);
+    Task<RunnerOutcome?> WaitAsync(string runId, TimeSpan timeout, CancellationToken ct);
+    Task<RunnerStopResponse> StopAsync(string runId, CancellationToken ct);
+    Task<RunnerLogsResponse> GetLogsAsync(string runId, CancellationToken ct);
+    bool Knows(string runId);
+}
+
+/// <summary>
 /// Ce que le nœud sait de ses propres conteneurs, et pourquoi il doit le savoir tout seul.
 ///
 /// <para>La surveillance d'un conteneur — attendre sa sortie, effacer les secrets en clair,
@@ -27,7 +43,7 @@ namespace AgentHost.Runner;
 /// enregistrée). Un redémarrage du pod runner la perd — c'est traité explicitement côté backend,
 /// qui voit alors « runner injoignable / run inconnu » plutôt qu'un faux succès.</para>
 /// </summary>
-public sealed class RunSupervisor
+public sealed class RunSupervisor : IRunSupervisor
 {
     private sealed record Tracked(
         string ContainerId,

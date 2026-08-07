@@ -18,21 +18,23 @@ public static class RunnerEndpoints
     /// <summary>Délai maximal d'une attente longue, borné pour ne pas dépasser les délais d'inactivité des ingress.</summary>
     private const int MaxWaitSeconds = 120;
 
-    /// <summary>
+    /// <param name="advertisedUrl">
     /// Adresse propre de ce pod runner (<c>Runner:AdvertisedUrl</c>), renvoyée à chaque lancement.
     /// Voir <see cref="RunnerLaunchResponse.CallbackUrl"/> : c'est elle que le backend persiste, et
-    /// non l'adresse du Service par laquelle il est arrivé.
-    /// </summary>
-    private static string? _advertisedUrl;
-
+    /// non l'adresse du Service par laquelle il est arrivé. Capturée par fermeture et non rangée
+    /// dans un champ statique — deux runners hébergés dans le même processus doivent pouvoir en
+    /// annoncer deux différentes, ce qui est précisément ce que teste le routage.
+    /// </param>
     public static IEndpointRouteBuilder MapRunnerEndpoints(
         this IEndpointRouteBuilder app, string authToken, string? advertisedUrl = null)
     {
-        _advertisedUrl = string.IsNullOrWhiteSpace(advertisedUrl) ? null : advertisedUrl.Trim().TrimEnd('/');
+        var advertised = string.IsNullOrWhiteSpace(advertisedUrl) ? null : advertisedUrl.Trim().TrimEnd('/');
 
         var runner = app.MapGroup("/runner").RequireRunnerToken(authToken);
 
-        runner.MapPost("/runs", Launch).WithName("RunnerLaunch");
+        runner.MapPost("/runs",
+            (AgentLaunchSpec spec, IRunSupervisor supervisor, ILogger logger, CancellationToken ct) =>
+                Launch(spec, supervisor, logger, advertised, ct)).WithName("RunnerLaunch");
         runner.MapPost("/runs/{runId}/stop", Stop).WithName("RunnerStop");
         runner.MapGet("/runs/{runId}/logs", Logs).WithName("RunnerLogs");
         runner.MapGet("/runs/{runId}/wait", Wait).WithName("RunnerWait");
@@ -41,7 +43,7 @@ public static class RunnerEndpoints
     }
 
     private static async Task<IResult> Launch(
-        AgentLaunchSpec spec, RunSupervisor supervisor, ILogger logger, CancellationToken ct)
+        AgentLaunchSpec spec, IRunSupervisor supervisor, ILogger logger, string? advertisedUrl, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(spec.RunId) || string.IsNullOrWhiteSpace(spec.ImageRef))
             return Results.BadRequest(new { error = "runId and imageRef are required" });
@@ -55,7 +57,7 @@ public static class RunnerEndpoints
             {
                 ContainerId = containerId,
                 RunnerId = RunSupervisor.RunnerId,
-                CallbackUrl = _advertisedUrl,
+                CallbackUrl = advertisedUrl,
             });
         }
         catch (Exception ex)
@@ -71,13 +73,13 @@ public static class RunnerEndpoints
         }
     }
 
-    private static async Task<IResult> Stop(string runId, RunSupervisor supervisor, CancellationToken ct)
+    private static async Task<IResult> Stop(string runId, IRunSupervisor supervisor, CancellationToken ct)
     {
         var response = await supervisor.StopAsync(runId, ct);
         return Results.Ok(response);
     }
 
-    private static async Task<IResult> Logs(string runId, RunSupervisor supervisor, CancellationToken ct)
+    private static async Task<IResult> Logs(string runId, IRunSupervisor supervisor, CancellationToken ct)
     {
         var response = await supervisor.GetLogsAsync(runId, ct);
         return Results.Ok(response);
@@ -90,7 +92,7 @@ public static class RunnerEndpoints
     /// « rien à signaler » pour « le run tourne toujours ».
     /// </summary>
     private static async Task<IResult> Wait(
-        string runId, RunSupervisor supervisor, CancellationToken ct, int timeoutSeconds = 30)
+        string runId, IRunSupervisor supervisor, CancellationToken ct, int timeoutSeconds = 30)
     {
         if (!supervisor.Knows(runId))
         {

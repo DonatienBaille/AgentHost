@@ -57,6 +57,7 @@ builder.Services.AddSingleton(pathMapper);
 builder.Services.AddSingleton(ContainerLauncherOptions.FromConfiguration(builder.Configuration));
 builder.Services.AddSingleton<ContainerLauncher>();
 builder.Services.AddSingleton<RunSupervisor>();
+builder.Services.AddSingleton<IRunSupervisor>(sp => sp.GetRequiredService<RunSupervisor>());
 
 builder.Services.AddHealthChecks()
     .AddCheck<ContainerRuntimeHealthCheck>("container-runtime", tags: new[] { "ready" });

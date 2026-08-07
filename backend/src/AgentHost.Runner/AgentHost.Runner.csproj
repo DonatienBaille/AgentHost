@@ -32,9 +32,10 @@
     <ProjectReference Include="../AgentHost.Shared/AgentHost.Shared.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <InternalsVisibleTo Include="AgentHost.Api.Tests" />
-  </ItemGroup>
+  <!-- Pas d'InternalsVisibleTo ici : il rendrait visible le type `Program` généré par les
+       instructions de haut niveau, qui entrerait alors en collision avec celui d'AgentHost.Api dans
+       le projet de tests. Les tests n'ont besoin que des types publics (RunnerEndpoints,
+       IRunSupervisor, RunnerAuthentication). -->
 
   <ItemGroup>
     <!-- Le projet n'utilise que Serilog.ILogger ; le global using implicite du SDK Web rendrait
