@@ -8,8 +8,8 @@ import { of } from 'rxjs';
 import { AgentDetailComponent } from './agent-detail.component';
 import { AgentService } from '../../../services/agent.service';
 import { AuthService } from '../../../services/auth.service';
-import { Agent, AgentVersion, UserRole } from '../../../core/models';
-import { agent, agentVersion, user } from '../../../core/testing/fixtures';
+import { Agent, AgentVersion, ManifestValidation, UserRole } from '../../../core/models';
+import { agent, agentVersion, manifestValidation, user } from '../../../core/testing/fixtures';
 
 /**
  * Double du service : mêmes signaux que le vrai, aucun HTTP.
@@ -28,6 +28,14 @@ class AgentServiceStub {
   readonly publishVersion = vi.fn(
     async (agentId: string, manifestYaml: string): Promise<AgentVersion> =>
       agentVersion({ agentId, manifestYaml, versionNumber: 2, id: 'v2' }),
+  );
+  /**
+   * L'éditeur de manifeste embarqué valide en direct. Le double répond « valide » sans réseau :
+   * ce qu'il renvoie n'est pas le sujet ici, ces tests portent sur la page qui l'entoure.
+   */
+  readonly validateManifest = vi.fn(
+    async (_manifestYaml: string): Promise<ManifestValidation> =>
+      manifestValidation({ metadata: { name: 'stub' }, spec: { type: 'oci' } }),
   );
 }
 

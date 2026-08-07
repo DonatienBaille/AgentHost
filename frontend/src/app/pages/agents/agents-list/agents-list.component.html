@@ -39,13 +39,8 @@
         </div>
       </div>
       <div>
-        <label class="block text-sm text-gray-400 mb-1" for="a-manifest">{{ 'agentsList.manifest' | translate }}</label>
-        <textarea
-          id="a-manifest"
-          formControlName="manifestYaml"
-          rows="8"
-          class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
-        ></textarea>
+        <span class="block text-sm text-gray-400 mb-1">{{ 'agentsList.manifest' | translate }}</span>
+        <app-manifest-editor (yamlChange)="onManifestYaml($event)" />
       </div>
       <label class="flex items-center gap-2 text-sm text-gray-300">
         <input type="checkbox" formControlName="publish" />

@@ -2,13 +2,14 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { TranslatePipe } from '@ngx-translate/core';
+import { ManifestEditorComponent } from '../../../components/manifest-editor/manifest-editor.component';
 import { AgentService } from '../../../services/agent.service';
 import { AuthService } from '../../../services/auth.service';
 
 @Component({
   selector: 'app-agents-list',
   standalone: true,
-  imports: [ReactiveFormsModule, RouterLink, TranslatePipe],
+  imports: [ReactiveFormsModule, RouterLink, TranslatePipe, ManifestEditorComponent],
   templateUrl: './agents-list.component.html',
   styleUrls: ['./agents-list.component.css'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -48,6 +49,14 @@ export class AgentsListComponent implements OnInit {
       this.projectId.set(projectId);
       this.agentService.listAgents(projectId ?? undefined);
     });
+  }
+
+  /**
+   * L'éditeur de manifeste produit du YAML dans les deux modes ; le contrôle réactif reste le seul
+   * porteur de la valeur soumise, avec sa validation « non vide ».
+   */
+  onManifestYaml(manifestYaml: string): void {
+    this.form.controls.manifestYaml.setValue(manifestYaml);
   }
 
   toggleForm(): void {

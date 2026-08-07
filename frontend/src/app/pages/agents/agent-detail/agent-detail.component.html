@@ -75,11 +75,10 @@
         }
 
         <form [formGroup]="publishForm" (ngSubmit)="publish()" class="space-y-4">
-          <textarea
-            formControlName="manifestYaml"
-            rows="10"
-            class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono"
-          ></textarea>
+          <app-manifest-editor
+            [initialYaml]="current_agent.manifestYaml"
+            (yamlChange)="onManifestYaml($event)"
+          />
           <button
             data-testid="publish-submit"
             type="submit"
