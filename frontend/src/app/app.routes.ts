@@ -8,6 +8,24 @@ export const routes: Routes = [
     title: 'Agent Host — Sign in',
   },
   {
+    // Cibles des liens envoyés par courriel. Anonymes par nécessité : celui qui réinitialise son
+    // mot de passe n'a plus de session, et l'invité n'a pas encore de compte.
+    path: 'reset-password',
+    loadComponent: () =>
+      import('./components/reset-password/reset-password.component').then(
+        (m) => m.ResetPasswordComponent,
+      ),
+    title: 'Agent Host — Reset password',
+  },
+  {
+    path: 'accept-invitation',
+    loadComponent: () =>
+      import('./components/accept-invitation/accept-invitation.component').then(
+        (m) => m.AcceptInvitationComponent,
+      ),
+    title: 'Agent Host — Join the organization',
+  },
+  {
     path: '',
     loadComponent: () =>
       import('./pages/dashboard/dashboard.component').then((m) => m.DashboardComponent),

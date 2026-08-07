@@ -21,6 +21,12 @@ export const REGISTER_PATH = `${BASE_URL}/register`;
 export const REFRESH_PATH = `${BASE_URL}/refresh`;
 export const LOGOUT_PATH = `${BASE_URL}/logout`;
 
+export const RESET_REQUEST_PATH = `${BASE_URL}/password-reset/request`;
+export const RESET_CONFIRM_PATH = `${BASE_URL}/password-reset/confirm`;
+
+/** Hors du groupe /api/auth : l'acceptation d'invitation vit sous /api/invitations. */
+export const ACCEPT_INVITATION_PATH = `${environment.apiUrl}/api/invitations/accept`;
+
 /**
  * The auth endpoints the server maps `AllowAnonymous` — credential *exchanges*, where the caller
  * proves itself with what is in the body (password, refresh token, reset token, MFA code) and a
@@ -34,8 +40,8 @@ export const ANONYMOUS_AUTH_PATHS = [
   LOGIN_PATH,
   REGISTER_PATH,
   REFRESH_PATH,
-  `${BASE_URL}/password-reset/request`,
-  `${BASE_URL}/password-reset/confirm`,
+  RESET_REQUEST_PATH,
+  RESET_CONFIRM_PATH,
   `${BASE_URL}/mfa/verify`,
 ];
 
@@ -85,6 +91,38 @@ export class AuthService {
   ): Promise<User> {
     const body: RegisterRequest = { orgName, orgSlug, email, password, displayName };
     const res = await firstValueFrom(this.http.post<AuthResponse>(REGISTER_PATH, body));
+    this.persist(res);
+    return res.user;
+  }
+
+  /**
+   * Demande un lien de réinitialisation. Ne renvoie **rien** d'exploitable, délibérément : le
+   * serveur répond 202 que le compte existe ou non, pour ne pas révéler quelles adresses sont
+   * enregistrées. L'IHM doit donc afficher le même message dans les deux cas.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    await firstValueFrom(this.http.post(RESET_REQUEST_PATH, { email }));
+  }
+
+  /**
+   * Fixe un nouveau mot de passe à partir du jeton reçu par courriel. N'ouvre PAS de session : le
+   * serveur ne renvoie pas de jetons ici, et c'est cohérent — quiconque tient le lien pourrait
+   * sinon se connecter sans jamais prouver qu'il connaît le compte autrement.
+   */
+  async confirmPasswordReset(token: string, newPassword: string): Promise<void> {
+    await firstValueFrom(this.http.post(RESET_CONFIRM_PATH, { token, newPassword }));
+  }
+
+  /**
+   * Crée le compte de l'invité et **ouvre sa session** : contrairement à la réinitialisation, le
+   * jeton d'invitation prouve qu'un membre de l'organisation a délibérément ouvert cet accès, et
+   * l'invité vient de choisir son mot de passe. Le faire repasser par l'écran de connexion
+   * n'ajouterait aucune garantie.
+   */
+  async acceptInvitation(token: string, password: string, displayName?: string): Promise<User> {
+    const res = await firstValueFrom(
+      this.http.post<AuthResponse>(ACCEPT_INVITATION_PATH, { token, password, displayName }),
+    );
     this.persist(res);
     return res.user;
   }

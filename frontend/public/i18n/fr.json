@@ -276,5 +276,27 @@
     "approved": "Validée",
     "rejected": "Rejetée",
     "expired": "Expirée"
+  },
+  "resetPassword": {
+    "requestTitle": "Mot de passe oublié",
+    "chooseTitle": "Choisir un nouveau mot de passe",
+    "requestHint": "Indiquez votre adresse : si un compte y est associé, un lien de réinitialisation vous sera envoyé.",
+    "requestSent": "Si un compte existe pour cette adresse, un lien de réinitialisation vient d'être envoyé. Pensez à vérifier vos indésirables.",
+    "sendLink": "Envoyer le lien",
+    "sending": "Envoi…",
+    "newPassword": "Nouveau mot de passe",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "done": "Votre mot de passe est modifié. Vous pouvez maintenant vous connecter.",
+    "failed": "Ce lien n'est plus valide, ou le mot de passe choisi ne respecte pas la politique. Demandez un nouveau lien.",
+    "backToLogin": "Retour à la connexion"
+  },
+  "acceptInvitation": {
+    "title": "Rejoindre l'organisation",
+    "hint": "Choisissez votre mot de passe : personne d'autre ne le connaîtra.",
+    "join": "Rejoindre",
+    "joining": "Création du compte…",
+    "missingToken": "Ce lien est incomplet : il ne porte aucun jeton d'invitation. Demandez à la personne qui vous a invité de vous renvoyer le lien.",
+    "failed": "Cette invitation n'est plus valide — expirée, déjà utilisée ou révoquée — ou le mot de passe choisi ne respecte pas la politique."
   }
 }

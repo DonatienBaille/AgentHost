@@ -276,5 +276,27 @@
     "approved": "Approved",
     "rejected": "Rejected",
     "expired": "Expired"
+  },
+  "resetPassword": {
+    "requestTitle": "Forgotten password",
+    "chooseTitle": "Choose a new password",
+    "requestHint": "Enter your address: if an account exists for it, a reset link will be sent.",
+    "requestSent": "If an account exists for that address, a reset link has just been sent. Check your spam folder.",
+    "sendLink": "Send the link",
+    "sending": "Sending…",
+    "newPassword": "New password",
+    "save": "Save",
+    "saving": "Saving…",
+    "done": "Your password has been changed. You can now sign in.",
+    "failed": "This link is no longer valid, or the chosen password does not meet the policy. Request a new link.",
+    "backToLogin": "Back to sign in"
+  },
+  "acceptInvitation": {
+    "title": "Join the organization",
+    "hint": "Choose your password: nobody else will know it.",
+    "join": "Join",
+    "joining": "Creating the account…",
+    "missingToken": "This link is incomplete: it carries no invitation token. Ask whoever invited you to send the link again.",
+    "failed": "This invitation is no longer valid — expired, already used, or revoked — or the chosen password does not meet the policy."
   }
 }

@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-388 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
+388 tests backend, 596 tests frontend, 12 tests end-to-end Playwright, build sans warning.
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
 contient** concrètement, et **à quoi on reconnaît qu'il est fini**. L'ordre est un défaut
@@ -304,8 +304,9 @@ Reste à traiter :
   la poignée de main STARTTLS, l'authentification et le délai d'expiration reposent sur le contrat
   documenté du BCL, pas sur une observation. À confronter au réel une fois, comme Podman, S3 et HIBP
   (lot 1.3).
-- Les liens des courriels pointent vers `/reset-password` et `/accept-invitation`, **écrans que le
-  front n'implémente pas encore** : le backend est prêt, l'IHM correspondante reste à faire.
+- ✅ Les écrans `/reset-password` et `/accept-invitation` existent : les liens des courriels mènent
+  désormais quelque part. La réinitialisation affiche **le même message que l'adresse existe ou
+  non**, pour ne pas rouvrir côté IHM l'oracle d'énumération que le 202 plat du serveur referme.
 - Aucun test de charge : le comportement sous concurrence est inconnu.
 - Pas de suppression en cascade au-delà du soft-delete organisation/projet (purge RGPD réelle).
 - Pas de réplication ni de restauration à un instant précis (PITR) — voir §6 de

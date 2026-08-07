@@ -85,3 +85,63 @@ test.describe('authentication', () => {
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
   });
 });
+
+/**
+ * Les deux écrans cibles des liens envoyés par courriel. Ils n'existaient pas quand le mailer a été
+ * branché : les liens pointaient vers des routes non implémentées, donc vers la redirection
+ * `**` du routeur.
+ */
+test.describe('écrans des liens de courriel', () => {
+  test('the reset screen asks for an address, and says the same thing whatever the answer', async ({
+    page,
+  }) => {
+    const account = await register(page);
+    await page.evaluate(() => localStorage.clear());
+
+    await page.goto('/reset-password');
+    await expect(page.locator('#reset-email')).toBeVisible();
+
+    // Une adresse qui existe.
+    await page.locator('#reset-email').fill(account.email);
+    await page.getByTestId('reset-request-submit').click();
+    const known = await page.getByTestId('reset-request-sent').textContent();
+
+    // Une adresse qui n'existe pas : le message doit être rigoureusement le même, sinon
+    // l'écran devient l'oracle d'énumération que le 202 plat du serveur referme.
+    await page.goto('/reset-password');
+    await page.locator('#reset-email').fill(`nobody-${Date.now()}@example.test`);
+    await page.getByTestId('reset-request-submit').click();
+    const unknown = await page.getByTestId('reset-request-sent').textContent();
+
+    expect(known?.trim()).toBeTruthy();
+    expect(unknown?.trim()).toBe(known?.trim());
+  });
+
+  test('a reset link with a dead token is refused instead of pretending to work', async ({ page }) => {
+    await page.goto('/reset-password?token=not-a-real-token');
+    await expect(page.locator('#reset-new-password')).toBeVisible();
+
+    await page.locator('#reset-new-password').fill('Some-New-Passphrase-123!');
+    await page.getByTestId('reset-submit').click();
+
+    await expect(page.getByTestId('reset-error')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('reset-done')).toHaveCount(0);
+  });
+
+  test('an invitation link with no token offers no form at all', async ({ page }) => {
+    await page.goto('/accept-invitation');
+
+    await expect(page.getByTestId('invitation-missing-token')).toBeVisible();
+    // Offrir un champ de mot de passe laisserait croire qu'un compte va être créé.
+    await expect(page.locator('#invite-password')).toHaveCount(0);
+  });
+
+  test('an invitation link with a dead token is refused', async ({ page }) => {
+    await page.goto('/accept-invitation?token=not-a-real-token');
+    await page.locator('#invite-password').fill('Some-New-Passphrase-123!');
+    await page.getByTestId('invitation-submit').click();
+
+    await expect(page.getByTestId('invitation-error')).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/accept-invitation/);
+  });
+});
