@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-357 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
+388 tests backend, 575 tests frontend, 8 tests end-to-end Playwright, build sans warning.
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
 contient** concrètement, et **à quoi on reconnaît qu'il est fini**. L'ordre est un défaut
@@ -100,7 +100,7 @@ contrat.
 **Pourquoi.** Trois choses empêchent aujourd'hui une mise en production défendable, et elles sont
 liées.
 
-### 1.1 Sortir l'orchestrateur dans un tier « runner »
+### 1.1 Sortir l'orchestrateur dans un tier « runner » ✅ livré
 
 Le backend parle au démon de conteneurs de **son propre nœud** : `StopAsync` et `GetLogsAsync`
 cherchent le conteneur sur *ce* démon. D'où `replicaCount: 1`, HPA désactivé et stratégie
@@ -115,6 +115,23 @@ interruption. Le backplane Redis SignalR et le stockage objet S3 sont déjà en 
 Effet de bord à traiter dans le même mouvement : la tension actuelle entre `hostWorkspacePath`
 (qui n'a de sens qu'avec un volume `hostPath`) et un PVC réseau. Avec un tier runner, le workspace
 devient local au runner et le problème disparaît.
+
+**Livré.** `AgentHost.Shared` (plomberie conteneur commune), `AgentHost.Runner` (l'orchestration
+exposée sur HTTP, protégée par jeton porteur partagé), `RemoteContainerOrchestrator` côté backend,
+et surtout la **migration 0009** : `runs.runner_url` rend l'affinité run → runner explicite et
+persistée. C'est elle qui débloque `replicaCount > 1` — n'importe quelle réplique peut désormais
+arrêter et lire un run qu'elle n'a pas lancé. Chart : runner en DaemonSet, backend redevenu
+réplicable. Le mode `inprocess` reste le défaut, donc aucune installation existante ne change.
+
+Les trois issues d'une annulation sont distinctes et aucune ne se présente comme un succès
+silencieux : confirmée, `runner_unknown` (aucun runner enregistré), `runner_unreachable`. Détail
+dans [docs/runner.md](docs/runner.md).
+
+**Non prouvé** : aucun conteneur n'a jamais été lancé à travers le runner — pas de démon dans
+l'environnement de développement (§1.3). Les 31 tests exercent le vrai `RunnerEndpoints` sur un
+vrai socket devant un superviseur simulé, dont le scénario de la seconde réplique avec deux runners
+distincts. Restent non exercés : le lancement réel, le DaemonSet sous Kubernetes, et plusieurs
+répliques sous trafic concurrent.
 
 ### 1.2 Isolation d'exécution renforcée ✅ pour ce qui est faisable ici
 
