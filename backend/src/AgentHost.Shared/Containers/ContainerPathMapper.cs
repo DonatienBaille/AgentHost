@@ -1,4 +1,6 @@
-namespace AgentHost.Api.Infrastructure;
+using Microsoft.Extensions.Configuration;
+
+namespace AgentHost.Shared.Containers;
 
 /// <summary>
 /// Translates run-data paths between the two filesystems that are involved in every container

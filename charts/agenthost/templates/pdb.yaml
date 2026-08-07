@@ -1,7 +1,8 @@
 {{- /*
-Only meaningful with more than one replica: a PDB of minAvailable 1 over a single-replica Deployment
-makes the pod undisruptable, which blocks node drains and upgrades instead of protecting
-availability. With replicaCount 1 (the default — see values.yaml) no budget is rendered.
+Un PDB minAvailable 1 sur un Deployment à une seule réplique rend le pod indisruptable : il bloque
+les drains de nœud et les mises à jour de cluster au lieu de protéger la disponibilité. Il n'est
+donc rendu qu'à partir de deux répliques — ce qui, depuis le lot 1.1, suppose runner.enabled: true
+(voir le garde-fou dans backend-deployment.yaml).
 */ -}}
 {{- if gt (int .Values.replicaCount) 1 }}
 apiVersion: policy/v1
@@ -14,4 +15,23 @@ spec:
     matchLabels:
       {{- include "agenthost.labels" . | nindent 6 }}
       app.kubernetes.io/component: backend
+{{- end }}
+{{- if and .Values.runner.enabled .Values.podDisruptionBudget.runner.enabled }}
+---
+{{- /*
+PDB du runner, exprimé en maxUnavailable et non en minAvailable : sur un DaemonSet, le nombre de
+pods est le nombre de nœuds, qu'aucune valeur du chart ne connaît. maxUnavailable: 1 dit ce qu'on
+veut réellement — vider un nœud à la fois, pour que la fenêtre pendant laquelle des runs perdent
+leur surveillance reste bornée à un nœud.
+*/ -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "agenthost.fullname" . }}-runner
+spec:
+  maxUnavailable: {{ .Values.podDisruptionBudget.runner.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "agenthost.labels" . | nindent 6 }}
+      app.kubernetes.io/component: runner
 {{- end }}

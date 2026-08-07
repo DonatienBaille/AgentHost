@@ -1,5 +1,6 @@
 using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Infrastructure.Storage;
+using AgentHost.Shared.Containers;
 using Serilog;
 
 namespace AgentHost.Api.Services;

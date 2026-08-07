@@ -1,0 +1,161 @@
+{{- /*
+Tier d'exécution (lot 1.1).
+
+POURQUOI UN DaemonSet ET NON UN Deployment. Le runner a besoin du socket du démon de conteneurs du
+nœud, qui est un hostPath : il n'est utile que là où il tourne, et il en faut donc exactement un par
+nœud éligible. Un Deployment répliqué placerait plusieurs runners sur un même nœud (deux processus
+se partageant le même démon, sans rien y gagner) et en laisserait d'autres sans aucun. Le DaemonSet
+est la forme qui correspond à ce que la ressource est réellement : locale au nœud.
+
+C'est aussi ce qui rend le backend réplicable. Tant que l'orchestrateur vivait dans le backend, le
+socket forçait la propriété « ce pod-là et pas un autre » sur un tier qui n'aurait jamais dû
+l'avoir. Elle est maintenant portée par le tier qui la possède vraiment.
+*/ -}}
+{{- if .Values.runner.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "agenthost.fullname" . }}-runner
+  labels:
+    {{- include "agenthost.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runner
+spec:
+  selector:
+    matchLabels:
+      {{- include "agenthost.labels" . | nindent 6 }}
+      app.kubernetes.io/component: runner
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Un nœud à la fois : pendant qu'un runner redémarre, ses conteneurs en cours continuent de
+      # tourner (ils appartiennent au démon, pas au runner), mais leur surveillance en mémoire est
+      # perdue et le backend voit « runner injoignable » le temps du redémarrage. Le limiter à un
+      # nœud borne cette fenêtre à un nœud à la fois.
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        {{- include "agenthost.labels" . | nindent 8 }}
+        app.kubernetes.io/component: runner
+    spec:
+      securityContext:
+        # Mêmes uid/gid que l'image backend : les deux écrivent dans le même arbre de runs.
+        runAsNonRoot: true
+        runAsUser: 64198
+        runAsGroup: 64198
+        fsGroup: 64198
+        {{- if and .Values.runner.mountSocket (gt (int .Values.docker.socketGroupId) 0) }}
+        # Laisse l'utilisateur non root atteindre le socket du nœud sans être root.
+        supplementalGroups:
+          - {{ .Values.docker.socketGroupId }}
+        {{- end }}
+      {{- with .Values.runner.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.runner.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: runner
+          image: "{{ .Values.image.runner }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: {{ .Values.runner.port }}
+              # hostPort volontairement absent : le runner n'est joignable que depuis le réseau de
+              # pods, et la NetworkPolicy n'y laisse entrer que le backend.
+          env:
+            - name: ASPNETCORE_URLS
+              value: "http://+:{{ .Values.runner.port }}"
+            - name: Runner__AuthToken
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agenthost.fullname" . }}-secrets
+                  key: runnerAuthToken
+            # Adresse propre de CE pod, annoncée au backend à chaque lancement. C'est le détail dont
+            # tout dépend : le backend choisit un runner via le Service (qui répartit), mais ce qu'il
+            # persiste dans runs.runner_url doit désigner le NŒUD retenu. Sans cela, l'arrêt d'un
+            # conteneur repasserait par le Service et atterrirait sur un nœud au hasard —
+            # exactement la panne que ce lot corrige, réintroduite un étage plus haut.
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: Runner__AdvertisedUrl
+              value: "http://$(POD_IP):{{ .Values.runner.port }}"
+            - name: Docker__Host
+              value: {{ .Values.docker.host | default (printf "unix://%s" .Values.docker.socketPath) | quote }}
+            - name: Docker__WorkspacePath
+              value: {{ .Values.runner.workspacePath | quote }}
+            {{- if .Values.runner.hostPathWorkspace }}
+            # Le runner écrit à même le nœud : sa vue et celle du démon sont le même chemin, donc
+            # rien à traduire. C'est le gain de fond du tier runner sur ce point — la tension entre
+            # hostWorkspacePath et un PVC réseau disparaît, parce que le workspace redevient local
+            # au processus qui parle au démon.
+            {{- else }}
+            {{- with .Values.docker.hostWorkspacePath }}
+            - name: Docker__HostWorkspacePath
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.docker.bindMountOptions }}
+            - name: Docker__BindMountOptions
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.docker.egressProxy }}
+            - name: Docker__EgressProxy
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.docker.allowlistNetwork }}
+            - name: Docker__AllowlistNetwork
+              value: {{ . | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: runs
+              mountPath: {{ .Values.runner.workspacePath }}
+            {{- if .Values.runner.mountSocket }}
+            - name: docker-socket
+              mountPath: {{ .Values.docker.socketPath }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources.runner | nindent 12 }}
+          readinessProbe:
+            # /health/ready pingue le démon : un nœud dont le socket ne répond pas sort des
+            # endpoints du Service, et le backend cesse de lui envoyer des lancements.
+            httpGet:
+              path: /health/ready
+              port: {{ .Values.runner.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            # Liveness sans dépendance : un démon momentanément indisponible ne doit pas faire
+            # redémarrer un runner qui détient encore des conteneurs vivants — la surveillance en
+            # mémoire de leurs issues partirait avec lui.
+            httpGet:
+              path: /health
+              port: {{ .Values.runner.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: runs
+          {{- if .Values.runner.hostPathWorkspace }}
+          # hostPath, et c'est cohérent ici : les données de run sont locales au nœud qui exécute le
+          # conteneur, et le démon doit voir ce répertoire sous ce chemin exact.
+          hostPath:
+            path: {{ .Values.runner.workspacePath }}
+            type: DirectoryOrCreate
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.runner.mountSocket }}
+        - name: docker-socket
+          hostPath:
+            path: {{ .Values.docker.socketPath }}
+            type: Socket
+        {{- end }}
+{{- end }}

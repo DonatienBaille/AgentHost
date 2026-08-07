@@ -1,3 +1,4 @@
+using AgentHost.Shared.Containers;
 using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Services;
 using Xunit;
@@ -99,6 +100,6 @@ public class ContainerRuntimeEndpointTests
     [InlineData(-1, 0L)]
     public void CpuCoresBecomeNanoCpus(long cores, long expected)
     {
-        Assert.Equal(expected, ContainerOrchestrator.NanoCpus(cores));
+        Assert.Equal(expected, ContainerLauncher.NanoCpus(cores));
     }
 }

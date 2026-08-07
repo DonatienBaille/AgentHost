@@ -1,0 +1,28 @@
+{{- /*
+Service du tier runner.
+
+CE QU'IL FAIT, ET CE QU'IL NE FAIT PAS. Le backend s'en sert UNIQUEMENT pour choisir un runner au
+moment du lancement : le ClusterIP répartit sur les pods prêts, c'est-à-dire sur les nœuds dont le
+démon répond. Une fois le run lancé, l'adresse du pod choisi est persistée dans `runs.runner_url`
+et l'arrêt comme les journaux vont droit à ce pod, sans repasser par le Service — router un arrêt à
+travers un équilibreur reviendrait à demander l'arrêt à un nœud au hasard.
+
+D'où `publishNotReadyAddresses: false` mais surtout la nécessité, pour le backend, de composer une
+adresse de POD et non le nom du Service. C'est ce que renvoie le runner à chaque lancement.
+*/ -}}
+{{- if .Values.runner.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agenthost.fullname" . }}-runner
+  labels:
+    {{- include "agenthost.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runner
+spec:
+  selector:
+    {{- include "agenthost.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runner
+  ports:
+    - port: {{ .Values.runner.port }}
+      targetPort: {{ .Values.runner.port }}
+{{- end }}

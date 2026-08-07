@@ -20,6 +20,9 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/AgentHost.Api/AgentHost.Api.csproj" />
+    <!-- Le tier runner est testé en hébergeant sa VRAIE API devant un superviseur simulé
+         (RunnerTierTests) : filtre d'authentification, codes de statut et formes JSON compris. -->
+    <ProjectReference Include="../../src/AgentHost.Runner/AgentHost.Runner.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Code commun au backend (AgentHost.Api) et au tier d'exécution (AgentHost.Runner).
+
+    POURQUOI UNE BIBLIOTHÈQUE PLUTÔT QU'UNE RÉFÉRENCE DE PROJET. Le runner aurait pu simplement
+    référencer AgentHost.Api : zéro déplacement de fichier. Il aurait alors embarqué Npgsql, l'AWS
+    SDK, SignalR, OpenTelemetry, le JWT et l'intégralité du modèle métier — dans un processus qui
+    détient le socket du démon de conteneurs, c'est-à-dire la surface la plus sensible du système.
+    Une bibliothèque étroite (Docker.DotNet + Serilog + la configuration) garde le runner petit,
+    auditable, et empêche structurellement la dépendance inverse « le runner lit la base ».
+
+    Ce qui vit ici n'est PAS « ce qui est partagé par hasard » mais « ce qui est local au nœud » :
+    la résolution du socket, la traduction des chemins de montage, la politique réseau, et la
+    plomberie de création/arrêt/journaux d'un conteneur (ContainerLauncher). L'état d'un run — la
+    base, la machine à états, le bus d'événements — reste côté backend et n'entre jamais ici.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AgentHost.Shared</RootNamespace>
+    <NoWarn>CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Docker.DotNet" Version="3.125.15" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+    <PackageReference Include="Serilog" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AgentHost.Api.Tests" />
+  </ItemGroup>
+
+</Project>

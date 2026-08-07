@@ -8,6 +8,19 @@ using Serilog;
 
 namespace AgentHost.Api.Services;
 
+/// <summary>
+/// Issue d'une annulation. Le run passe en <c>cancelled</c> dans tous les cas — l'utilisateur l'a
+/// demandé, et le laisser courir serait pire — mais <see cref="ContainerStopConfirmed"/> dit si
+/// quelqu'un a effectivement confirmé l'arrêt du conteneur.
+///
+/// <para>C'est la distinction que l'ancienne signature (<c>Task&lt;bool&gt;</c>) ne pouvait pas
+/// exprimer : « annulé » et « on a demandé l'annulation à un runner qui ne répond plus » y étaient
+/// le même <c>true</c>. Avec un tier runner, le second cas devient ordinaire.</para>
+/// </summary>
+/// <param name="ContainerStopConfirmed">Vrai seulement si l'arrêt du conteneur est confirmé.</param>
+/// <param name="Detail">Ce qui empêche la confirmation, à afficher tel quel. Null quand tout va bien.</param>
+public sealed record RunCancelResult(bool ContainerStopConfirmed, string? Detail = null);
+
 public interface IRunService
 {
     Task<Run> CreateAsync(CreateRunRequest req, CancellationToken ct = default);
@@ -15,7 +28,7 @@ public interface IRunService
     Task<List<Run>> ListAsync(int skip, int take, CancellationToken ct = default);
     Task<List<Run>> ListByProjectAsync(string projectId, int skip = 0, int take = 50, CancellationToken ct = default);
     Task<bool> ApproveAsync(string runId, ApprovalRequest req, CancellationToken ct = default);
-    Task<bool> CancelAsync(string runId, CancellationToken ct = default);
+    Task<RunCancelResult?> CancelAsync(string runId, CancellationToken ct = default);
     Task<bool> AnswerQuestionAsync(string runId, string questionId, string answer, CancellationToken ct = default);
     Task<List<RunEvent>> GetEventsAsync(string runId, long fromSeq, CancellationToken ct = default);
 }
@@ -397,18 +410,43 @@ public class RunService : IRunService
         return true;
     }
 
-    public async Task<bool> CancelAsync(string runId, CancellationToken ct = default)
+    /// <summary>
+    /// Annule le run. Renvoie <c>null</c> quand il n'y a rien à annuler (run inexistant ou déjà
+    /// terminal) — c'est le <c>false</c> d'avant.
+    ///
+    /// <para>Quand l'arrêt du conteneur n'est pas confirmé, le run passe quand même en
+    /// <c>cancelled</c>, mais un événement <c>run.cancel_unconfirmed</c> de niveau <c>warn</c> est
+    /// publié sur sa chronologie. C'est ce qui rend la dégradation visible à l'écran : le corps
+    /// d'une réponse HTTP se perd, la chronologie du run reste.</para>
+    /// </summary>
+    public async Task<RunCancelResult?> CancelAsync(string runId, CancellationToken ct = default)
     {
         var run = await _runRepository.GetAsync(runId, ct);
         if (run is null || run.Status.IsTerminal())
-            return false;
+            return null;
 
-        await _orchestrator.StopAsync(runId, ct);
+        var stop = await _orchestrator.StopAsync(runId, ct);
         await _stateMachine.TransitionAsync(run, RunStatus.Cancelled, "cancelled by user", ct);
 
         await _auditService.RecordAsync(run.OrgId, "run.cancelled", CallerUserId ?? run.TriggeredByUserId, "run", run.Id, ct: ct);
 
-        return true;
+        if (stop.Confirmed)
+            return new RunCancelResult(true);
+
+        _logger.Warning("Run {RunId} was cancelled but the container stop is not confirmed: {Detail}",
+            runId, stop.Detail);
+
+        await _eventBus.PublishAsync(new RunEvent
+        {
+            RunId = runId,
+            EventType = "run.cancel_unconfirmed",
+            Level = "warn",
+            Message = "Run marked cancelled, but no node confirmed that its container was stopped. " +
+                      "It may still be executing.",
+            Payload = new { outcome = stop.Outcome.ToString(), detail = stop.Detail },
+        }, ct);
+
+        return new RunCancelResult(false, stop.Detail);
     }
 
     public async Task<bool> AnswerQuestionAsync(string runId, string questionId, string answer, CancellationToken ct = default)

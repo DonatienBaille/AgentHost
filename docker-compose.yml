@@ -78,6 +78,50 @@ services:
     expose:
       - "2375"
 
+  # Tier d'exécution (lot 1.1). Un processus par nœud en production (DaemonSet) ; ici, un service.
+  #
+  # POURQUOI IL EXISTE EN COMPOSE ALORS QUE LE DÉFAUT RESTE « inprocess ». Le mode remote est
+  # justement celui qu'on ne peut pas valider en le lisant : il faut voir un run partir, être
+  # arrêté et relire ses journaux à travers deux processus. Le service est donc toujours démarré,
+  # et c'est le backend qui choisit de s'en servir ou non :
+  #
+  #   docker compose up                                  -> backend en mode inprocess (défaut)
+  #   AGENTHOST_RUNNER_MODE=remote docker compose up      -> backend passant par le runner
+  #
+  # Le chemin inprocess reste donc pleinement fonctionnel pour le développement, ce qui est la
+  # condition pour que le défaut reste crédible.
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    container_name: agenthost-runner
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:5001
+      # Jeton partagé avec le backend. Valeur de développement : sans jeton, le runner refuse de
+      # démarrer (voir RunnerAuthentication) — un runner ouvert est un accès root au nœud.
+      Runner__AuthToken: ${AGENTHOST_RUNNER_TOKEN:-dev-runner-token-please-change-me}
+      # Par le proxy filtrant, jamais le socket brut — même raisonnement que pour le backend.
+      Docker__Host: tcp://docker-socket-proxy:2375
+      Docker__WorkspacePath: /var/agenthost/runs
+      # Le démon résout les sources de montage sur l'hôte ; ce conteneur voit le même arbre sous
+      # /var/agenthost/runs. Même variable que côté backend, pour que les deux modes écrivent au
+      # même endroit et qu'un run lancé dans un mode reste lisible dans l'autre.
+      Docker__HostWorkspacePath: ${AGENTHOST_HOST_RUNS_PATH:-${PWD}/runs}
+    volumes:
+      # Doit être inscriptible par l'uid 64198 (voir la note du service backend).
+      - ./runs:/var/agenthost/runs
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
+    expose:
+      - "5001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -91,6 +135,12 @@ services:
       ConnectionStrings__DefaultConnection: "Host=postgres;Database=agenthost;Username=agenthost;Password=agenthost_dev"
       Redis__Host: redis
       Redis__Port: "6379"
+      # Orchestration. « inprocess » par défaut : le backend parle lui-même au démon, exactement
+      # comme avant le lot 1.1. AGENTHOST_RUNNER_MODE=remote bascule sur le service runner
+      # ci-dessus ; BaseUrl et AuthToken sont déjà là, ils ne servent qu'en mode remote.
+      Runner__Mode: ${AGENTHOST_RUNNER_MODE:-inprocess}
+      Runner__BaseUrl: http://runner:5001
+      Runner__AuthToken: ${AGENTHOST_RUNNER_TOKEN:-dev-runner-token-please-change-me}
       # Through the filtering proxy, never the raw socket (see docker-socket-proxy above).
       Docker__Host: tcp://docker-socket-proxy:2375
       # Where THIS container reads/writes run data...
@@ -132,6 +182,8 @@ services:
       redis:
         condition: service_healthy
       docker-socket-proxy:
+        condition: service_started
+      runner:
         condition: service_started
     healthcheck:
       # Liveness only: readiness (/health/ready) also checks Postgres, and compose must not keep

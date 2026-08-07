@@ -2,9 +2,13 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder
 WORKDIR /src
 
+# AgentHost.Shared porte la plomberie conteneur commune au backend et au tier runner ; le backend
+# la référence, donc elle entre dans le contexte de build avant la restauration.
+COPY backend/src/AgentHost.Shared/AgentHost.Shared.csproj backend/src/AgentHost.Shared/
 COPY backend/src/AgentHost.Api/AgentHost.Api.csproj backend/src/AgentHost.Api/
 RUN dotnet restore backend/src/AgentHost.Api/AgentHost.Api.csproj
 
+COPY backend/src/AgentHost.Shared/ backend/src/AgentHost.Shared/
 COPY backend/src/AgentHost.Api/ backend/src/AgentHost.Api/
 RUN dotnet publish backend/src/AgentHost.Api/AgentHost.Api.csproj -c Release -o /app/publish
 

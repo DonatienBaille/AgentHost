@@ -45,6 +45,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Plomberie conteneur nœud-locale, partagée avec AgentHost.Runner (voir sa csproj). -->
+    <ProjectReference Include="../AgentHost.Shared/AgentHost.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="AgentHost.Api.Tests" />
   </ItemGroup>
 

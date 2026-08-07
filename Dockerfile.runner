@@ -1,0 +1,42 @@
+# Tier d'exécution (AgentHost.Runner). Un par nœud ; c'est le seul processus qui a besoin du
+# socket du démon de conteneurs.
+
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder
+WORKDIR /src
+
+COPY backend/src/AgentHost.Shared/AgentHost.Shared.csproj backend/src/AgentHost.Shared/
+COPY backend/src/AgentHost.Runner/AgentHost.Runner.csproj backend/src/AgentHost.Runner/
+RUN dotnet restore backend/src/AgentHost.Runner/AgentHost.Runner.csproj
+
+COPY backend/src/AgentHost.Shared/ backend/src/AgentHost.Shared/
+COPY backend/src/AgentHost.Runner/ backend/src/AgentHost.Runner/
+RUN dotnet publish backend/src/AgentHost.Runner/AgentHost.Runner.csproj -c Release -o /app/publish
+
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Même uid/gid que l'image backend : les deux écrivent dans le même arbre /var/agenthost/runs quand
+# ils partagent un volume, et un décalage d'uid s'y traduirait par un /workspace illisible.
+#
+# SÉCURITÉ : ce conteneur reçoit le socket du démon, c'est-à-dire l'équivalent de root sur le nœud.
+# Le compte non privilégié réduit ce qui est atteignable depuis une RCE dans le processus lui-même,
+# il ne réduit rien de ce que le socket permet. La barrière qui compte est le réseau : n'exposer ce
+# port qu'au backend (NetworkPolicy du chart), et le jeton Runner:AuthToken par-dessus.
+RUN groupadd --system --gid 64198 agenthost \
+    && useradd --system --uid 64198 --gid agenthost --home-dir /app --shell /usr/sbin/nologin agenthost
+
+COPY --from=builder --chown=agenthost:agenthost /app/publish .
+
+RUN mkdir -p /var/agenthost/runs \
+    && chown -R agenthost:agenthost /var/agenthost
+
+USER agenthost
+
+EXPOSE 5001
+ENTRYPOINT ["dotnet", "AgentHost.Runner.dll"]

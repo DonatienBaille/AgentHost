@@ -31,8 +31,17 @@ docker:
   # same absolute path. Left empty here because the chart's default runs volume is a PVC.
   hostWorkspacePath: ""
 
+# Le tier runner marche à l'identique sur Podman : c'est le même code de lancement, et la seule
+# chose qui change reste le chemin du socket (ci-dessus) et les options de montage. Activez-le pour
+# passer à plusieurs répliques backend :
+#   runner:
+#     enabled: true
+#     authToken: "<openssl rand -base64 32>"
+#   replicaCount: 2
+
 # Artifacts in a bucket instead of on the node. This is what makes artifact serving independent of
-# which node the pod landed on; the orchestrator remains node-bound, so replicaCount stays 1.
+# which node the pod landed on. Avec runner.enabled et plusieurs répliques, c'est une obligation :
+# sur disque local, chaque réplique ne sert que les artefacts qu'elle a écrits.
 artifacts:
   provider: s3
   s3:

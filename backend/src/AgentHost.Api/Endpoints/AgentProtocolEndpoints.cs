@@ -377,7 +377,7 @@ public static class AgentProtocolEndpoints
             run.ErrorMessage = $"Budget of {run.BudgetMaxUsd:0.##} USD exceeded ({newTotal:0.##} USD used)";
             run.FinishedAt = DateTime.UtcNow;
 
-            await orchestrator.StopAsync(runId, ct);
+            var stop = await orchestrator.StopAsync(runId, ct);
             await stateMachine.TryTransitionAsync(run, RunStatus.BudgetExceeded, "budget exceeded", ct);
 
             await eventBus.PublishAsync(new RunEvent
@@ -386,8 +386,23 @@ public static class AgentProtocolEndpoints
                 EventType = "budget.exceeded",
                 Level = "error",
                 Message = run.ErrorMessage,
-                Payload = new { budgetUsedUsd = newTotal, budgetMaxUsd = run.BudgetMaxUsd },
+                Payload = new
+                {
+                    budgetUsedUsd = newTotal,
+                    budgetMaxUsd = run.BudgetMaxUsd,
+                    // Un dépassement de budget dont l'arrêt n'est pas confirmé, c'est un agent qui
+                    // continue peut-être de dépenser après que la plateforme a dit « stop ». C'est
+                    // la seule information qui compte vraiment ici, elle voyage avec l'événement.
+                    containerStopConfirmed = stop.Confirmed,
+                    stopDetail = stop.Detail,
+                },
             }, ct);
+
+            if (!stop.Confirmed)
+            {
+                logger.Warning("Run {RunId} exceeded its budget but the container stop is not confirmed: {Detail}",
+                    runId, stop.Detail);
+            }
         }
 
         return Results.Ok(new AgentUsageResponse

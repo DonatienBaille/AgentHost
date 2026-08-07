@@ -20,6 +20,18 @@ public class Run
 
     public string? WorkspacePath { get; set; }
 
+    /// <summary>
+    /// Base URL du tier runner qui détient le conteneur de ce run (colonne <c>runs.runner_url</c>,
+    /// migration 0009). Écrite juste avant le lancement en mode <c>Runner:Mode = remote</c> ; c'est
+    /// elle qui permet à n'importe quelle réplique du backend d'arrêter ou de lire un run qu'elle
+    /// n'a pas lancé.
+    ///
+    /// <para><c>null</c> n'est pas une anomalie : run antérieur à la migration, run lancé en mode
+    /// <c>inprocess</c> (le défaut), ou run qui n'a jamais atteint le lancement. Le mode distant
+    /// répond alors explicitement « aucun runner enregistré » plutôt que de prétendre avoir agi.</para>
+    /// </summary>
+    public string? RunnerUrl { get; set; }
+
     public long? DurationMs { get; set; }
     public int? ExitCode { get; set; }
 

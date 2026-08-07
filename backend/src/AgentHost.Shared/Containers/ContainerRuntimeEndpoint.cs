@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Configuration;
 
-namespace AgentHost.Api.Infrastructure;
+namespace AgentHost.Shared.Containers;
 
 /// <summary>Which engine is answering on the resolved socket, as far as its path lets us tell.</summary>
 public enum ContainerRuntimeKind
