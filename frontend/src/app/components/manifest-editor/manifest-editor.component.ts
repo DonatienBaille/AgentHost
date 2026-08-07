@@ -24,6 +24,7 @@ import {
   UnsupportedConstruct,
   VCS_PERMISSIONS,
   emptyManifestModel,
+  findCommentLines,
   formatScalarText,
   importManifest,
   manifestModelToYaml,
@@ -149,7 +150,15 @@ export class ManifestEditorComponent implements OnDestroy {
 
     const imported = importManifest(validation);
     this.model.set(imported.model);
-    this.unsupported.set(imported.unsupported);
+
+    // Les commentaires ne sont dans aucun document analysé : c'est la seule perte que le
+    // convertisseur ne peut pas voir, elle se repère sur le texte source.
+    const commentLines = findCommentLines(source);
+    this.unsupported.set(
+      commentLines.length === 0
+        ? imported.unsupported
+        : [...imported.unsupported, { path: `# ${commentLines.join(', ')}`, reason: 'comments' }],
+    );
     return true;
   }
 

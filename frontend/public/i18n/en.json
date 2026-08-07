@@ -286,6 +286,7 @@
     "unsupportedTitle": "Some parts of this manifest cannot be edited in the form.",
     "unsupportedIntro": "They are kept as-is and written back unchanged; switch to YAML mode to edit them.",
     "unsupported": {
+      "comments": "YAML comments: the form rewrites the file without them",
       "unknownKey": "key the form does not model",
       "schemaShape": "schema shape the field builder does not cover",
       "schemaRootKeyword": "schema keyword outside type / properties / required",

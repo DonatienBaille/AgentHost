@@ -51,6 +51,7 @@ export interface PreservedFragment {
 }
 
 export type UnsupportedReason =
+  | 'comments'
   | 'unknownKey'
   | 'schemaShape'
   | 'schemaRootKeyword'

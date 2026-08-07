@@ -309,7 +309,8 @@ describe('ManifestEditorComponent', () => {
       const document = nonTrivialManifestDocument();
       setup('', manifestValidation(document));
       await component.setMode('yaml');
-      component.onYamlInput('# le texte importe peu : le serveur fait autorité\n');
+      // Le texte importe peu : c'est le serveur qui lit, et le double répond le manifeste choisi.
+      component.onYamlInput('metadata:\n  name: redacteur\n');
 
       await component.setMode('form');
 
@@ -423,6 +424,31 @@ describe('ManifestEditorComponent', () => {
       expect(emitted.at(-1)).toContain('sidecars:');
       expect(emitted.at(-1)).toContain('image: redis:7');
       expect(emitted.at(-1)).toContain('description: changé');
+    });
+
+    it('warns that YAML comments will not survive a rewrite by the form', async () => {
+      setup('', manifestValidation(nonTrivialManifestDocument()));
+      await component.setMode('yaml');
+      component.onYamlInput('# ce que fait cet agent\nmetadata:\n  name: x  # identifiant\n');
+
+      await component.setMode('form');
+      fixture.detectChanges();
+
+      // Les commentaires n'existent dans aucun document analysé : c'est la seule perte que le
+      // convertisseur ne peut pas voir.
+      expect(component.unsupported()).toEqual([{ path: '# 1, 3', reason: 'comments' }]);
+      expect(el('unsupported-banner')!.textContent).toContain('manifestEditor.unsupported.comments');
+    });
+
+    it('says nothing about comments when there are none', async () => {
+      setup('', manifestValidation(nonTrivialManifestDocument()));
+      await component.setMode('yaml');
+      // Le « # » est dans une chaîne citée : ce n'est pas un commentaire.
+      component.onYamlInput('metadata:\n  description: "rapport #12"\n');
+
+      await component.setMode('form');
+
+      expect(component.unsupported()).toEqual([]);
     });
 
     it('locks the schema builder and keeps the schema whole', async () => {

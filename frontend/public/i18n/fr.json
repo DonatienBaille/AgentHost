@@ -286,6 +286,7 @@
     "unsupportedTitle": "Certaines parties de ce manifeste ne sont pas éditables au formulaire.",
     "unsupportedIntro": "Elles sont conservées telles quelles et réécrites à l'identique ; passez en mode YAML pour les modifier.",
     "unsupported": {
+      "comments": "commentaires du YAML : le formulaire réécrit le fichier sans eux",
       "unknownKey": "clé que le formulaire ne connaît pas",
       "schemaShape": "forme de schéma que le constructeur de champs ne couvre pas",
       "schemaRootKeyword": "mot-clé de schéma hors de type / properties / required",

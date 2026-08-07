@@ -199,6 +199,29 @@ export function manifestModelToYaml(model: ManifestFormModel): string {
   return emitYaml(manifestModelToDocument(model));
 }
 
+/**
+ * Les lignes de commentaire du YAML source.
+ *
+ * Un commentaire n'existe pas dans le document analysé : il ne survit ni au parseur du serveur, ni
+ * à la projection JSON, ni à la réécriture par le formulaire. C'est une perte réelle, et la seule
+ * que le reste du convertisseur ne peut pas voir — d'où ce repérage sur le texte brut.
+ *
+ * L'heuristique est volontairement prudente : une ligne entièrement commentée, ou un « # » précédé
+ * d'un blanc sur une ligne qui ne contient aucune apostrophe ni guillemet. Un « # » à l'intérieur
+ * d'une chaîne citée n'est donc jamais compté. À l'inverse, un « # » dans une chaîne **non** citée
+ * (`description: rapport #12`) est compté à tort : signaler un commentaire qui n'existe pas fait
+ * regarder deux fois, en manquer un fait perdre du texte sans le dire.
+ */
+export function findCommentLines(yaml: string): number[] {
+  const lines: number[] = [];
+  yaml.split('\n').forEach((line, index) => {
+    const isWholeLine = /^\s*#/.test(line);
+    const isTrailing = /\s#/.test(line) && !/['"]/.test(line);
+    if (isWholeLine || isTrailing) lines.push(index + 1);
+  });
+  return lines;
+}
+
 function setAtPath(root: JsonObject, path: string[], value: JsonValue): void {
   let node = root;
   for (let i = 0; i < path.length - 1; i++) {
