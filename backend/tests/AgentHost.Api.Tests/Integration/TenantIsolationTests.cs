@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using AgentHost.Api.Contracts;
 using AgentHost.Api.Domain;
+using AgentHost.Api.Infrastructure;
 using Xunit;
 
 namespace AgentHost.Api.Tests.Integration;
@@ -69,16 +70,25 @@ public class TenantIsolationTests
         var b = await CreateTenantAsync();
 
         // Generate an audit entry in B so there is genuinely something to leak.
-        await CreateRunAsync(b);
+        var bRun = await CreateRunAsync(b);
+        await CreateRunAsync(a);
 
         await AssertNotFound(a.Client.GetAsync($"/api/organizations/{b.OrgId}/audit-log"));
+        await AssertNotFound(a.Client.GetAsync($"/api/organizations/{b.OrgId}/audit-log/facets"));
 
-        // A's own audit log is readable, and contains only A's org id.
+        // A's own audit log is readable, and B's activity is nowhere in it. The served entries no
+        // longer carry an org id to compare — the scope comes from the JWT, so the server has
+        // nothing to echo back — hence the check is on B's actual run id, which is the thing a
+        // leak would expose.
         var ownResponse = await a.Client.GetAsync($"/api/organizations/{a.OrgId}/audit-log");
         Assert.Equal(HttpStatusCode.OK, ownResponse.StatusCode);
-        var entries = await ownResponse.Content.ReadFromJsonAsync<List<AuditLogEntry>>(TestJson.Options);
-        Assert.NotNull(entries);
-        Assert.All(entries!, e => Assert.Equal(a.OrgId, e.OrgId));
+        var page = await ownResponse.Content.ReadFromJsonAsync<AuditPage>(TestJson.Options);
+        Assert.NotNull(page);
+        Assert.NotEmpty(page!.Items);
+        Assert.DoesNotContain(page.Items, e => e.ResourceId == bRun.Id);
+        // The total is part of the answer too: counting another tenant's entries leaks their
+        // volume of activity without showing a single line.
+        Assert.Equal(page.Items.Count, page.Total);
     }
 
     [Fact]
@@ -356,9 +366,13 @@ public class TenantIsolationTests
 
         var auditResponse = await a.Client.GetAsync($"/api/organizations/{a.OrgId}/audit-log?take=100000000&skip=-5");
         Assert.Equal(HttpStatusCode.OK, auditResponse.StatusCode);
-        var entries = await auditResponse.Content.ReadFromJsonAsync<List<AuditLogEntry>>(TestJson.Options);
-        Assert.NotNull(entries);
-        Assert.InRange(entries!.Count, 0, 200);
+        var page = await auditResponse.Content.ReadFromJsonAsync<AuditPage>(TestJson.Options);
+        Assert.NotNull(page);
+        Assert.InRange(page!.Items.Count, 0, 200);
+        // The envelope reports the paging actually applied, so the clamp is observable and not
+        // merely inferred from a short page.
+        Assert.Equal(Paging.MaxTake, page.Take);
+        Assert.Equal(0, page.Skip);
     }
 
     // ---- Helpers -----------------------------------------------------------------------------
