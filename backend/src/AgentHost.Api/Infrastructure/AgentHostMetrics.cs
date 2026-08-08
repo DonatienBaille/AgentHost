@@ -86,7 +86,17 @@ public class AgentHostMetrics
     /// Un run vient d'atteindre un état terminal. Enregistre d'un coup tout ce que l'on sait de
     /// lui, pour qu'aucun appelant n'ait à se souvenir d'appeler trois méthodes.
     /// </summary>
-    public void RunFinished(Run run, RunStatus status)
+    /// <param name="wasQueued">
+    /// Ce run avait-il réellement occupé la file, c'est-à-dire dépassé l'état <c>Pending</c> ?
+    ///
+    /// <b>Le paramètre existe parce que son absence rendait la jauge négative.</b> Un run refusé
+    /// avant tout lancement passe directement de <c>Pending</c> à un état terminal : il n'a jamais
+    /// été compté à l'entrée, et le décompter à la sortie faisait descendre
+    /// <c>agenthost.run.in_flight</c> sous zéro — une profondeur de file négative dans tout
+    /// tableau de bord d'exploitation. L'appelant est le seul à connaître l'état précédent ; on le
+    /// lui demande plutôt que de le deviner.
+    /// </param>
+    public void RunFinished(Run run, RunStatus status, bool wasQueued = true)
     {
         var tags = new TagList
         {
@@ -97,7 +107,9 @@ public class AgentHostMetrics
         };
 
         _runsFinished.Add(1, tags);
-        _runsInFlight.Add(-1, new KeyValuePair<string, object?>("org", run.OrgId));
+
+        // Symétrique de RunQueued, et uniquement pour les runs qui y sont réellement passés.
+        if (wasQueued) _runsInFlight.Add(-1, new KeyValuePair<string, object?>("org", run.OrgId));
 
         // Une durée n'existe que si le run a réellement démarré : un run rejeté avant lancement n'a
         // pas de durée de 0, il n'en a pas du tout, et l'enregistrer à 0 tirerait les percentiles

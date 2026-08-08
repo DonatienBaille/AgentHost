@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-522 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
+525 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
 (Chiffres mesurés en exécutant les trois suites après fusion, pas déduits.)
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
@@ -419,7 +419,31 @@ Trois décisions à connaître :
 6 tests, dont 5 contre un vrai Redis (sautés explicitement, jamais passés en silence, quand aucun ne
 répond — même dispositif que `DockerFactAttribute`).
 
-### 4.4 Reste à faire dans ce lot
+### 4.4 Défaut trouvé en exerçant la vraie sortie `/metrics`
+
+La jauge `agenthost.run.in_flight` — la profondeur de la file, livrée au lot 3 — était **fausse**,
+et de deux façons indépendantes :
+
+1. `RunQueued` était défini et appelé **nulle part**. La jauge ne faisait que décroître.
+2. Un run refusé avant tout lancement (`Pending → Rejected`) était décompté à la sortie sans avoir
+   jamais été compté à l'entrée.
+
+Résultat : `agenthost_run_in_flight -1` après un seul run, et une profondeur de file négative dans
+tout tableau de bord d'exploitation. Rien de tout cela ne se voyait à la lecture — les deux côtés du
+compteur existaient et étaient correctement étiquetés — et aucun test ne l'attrapait, parce que tous
+les tests utilisaient un instrument **sans collecteur** : il s'exécute, il n'écrit nulle part, et
+personne ne regarde la somme.
+
+Il a fallu lancer un vrai backend et lire sa sortie `/metrics` pour le voir. Corrigé, et couvert par
+trois tests qui branchent un `MeterListener` — le mécanisme même de l'exporteur — de sorte que la
+somme soit **observée** et non seulement émise. Vérification finale contre l'exporteur réel : la
+série vaut désormais 0 après un run complet.
+
+C'est la raison pour laquelle l'observabilité opérationnelle ci-dessous n'est pas qu'un travail de
+configuration : les règles d'alerte se poseront sur ces séries, et une série fausse produit une
+alerte fausse ou, pire, silencieuse.
+
+### 4.5 Reste à faire dans ce lot
 
 - **Pools de conteneurs pré-chauffés** et **réutilisation de workspaces** entre runs d'un même
   projet : les deux exigent un runtime de conteneurs, que cet environnement n'a pas (voir

@@ -81,6 +81,20 @@ public class RunStateMachine
         _logger.Information("Run {RunId} transitioned {From} -> {To} ({Reason})",
             run.Id, previousStatus, newStatus, reason ?? "n/a");
 
+        // Le pendant de RunFinished, et il manquait. `RunQueued` était défini et appelé nulle
+        // part : la jauge `agenthost.run.in_flight` ne faisait que décroître, si bien que tout
+        // tableau de bord d'exploitation affichait une profondeur de file NÉGATIVE. Le défaut ne
+        // se voyait pas à la lecture — les deux côtés existaient — mais sur la sortie réelle de
+        // /metrics, où la série valait -1 après un seul run.
+        //
+        // Ici et pas à la création du run : c'est la seule transition qui mène à `Queued`, et le
+        // garde `IsValidTransition` en amont interdit d'y revenir depuis un état ultérieur. Un run
+        // ne peut donc pas être compté deux fois.
+        if (newStatus == RunStatus.Queued)
+        {
+            _metrics.RunQueued(run.OrgId);
+        }
+
         if (newStatus.IsTerminal())
         {
             var payload = new { runId = run.Id, projectId = run.ProjectId, status = newStatus.ToDbString() };
@@ -91,7 +105,10 @@ public class RunStateMachine
 
             // Après l'écriture et l'historique : la métrique décrit ce qui s'est produit, elle ne
             // doit pas être émise pour une transition que la base aurait refusée.
-            _metrics.RunFinished(run, newStatus);
+            // `previousStatus` est la seule chose qui dise si ce run a occupé la file : un run
+            // refusé depuis `Pending` n'y est jamais entré, et le décompter le ferait passer sous
+            // zéro.
+            _metrics.RunFinished(run, newStatus, wasQueued: previousStatus != RunStatus.Pending);
         }
     }
 
