@@ -275,3 +275,97 @@ test.describe('journal d’audit', () => {
     await expect(page.getByTestId('audit-row')).toHaveCount(1);
   });
 });
+
+/**
+ * Les déclencheurs (lot 4), contre la vraie API.
+ *
+ * Ce que les tests de composants ne peuvent pas attraper : le câblage. Route, lien depuis la fiche
+ * projet, URL des endpoints, forme réelle des réponses — et surtout le fait que le secret vienne
+ * bien du serveur et ne soit rendu qu'une fois.
+ */
+test.describe('déclencheurs', () => {
+  test('a project with no trigger says so instead of rendering an empty shell', async ({ page }) => {
+    await register(page);
+    const projectId = await createProject(page, unique('proj'));
+
+    await page.goto(`/projects/${projectId}/triggers`);
+    await expect(page.getByTestId('triggers-empty')).toBeVisible({ timeout: 20_000 });
+  });
+
+  test('creating a webhook trigger reveals its secret exactly once', async ({ page }) => {
+    await register(page);
+    const projectSlug = unique('proj');
+    const projectId = await createProject(page, projectSlug);
+    await createPublishedAgent(page, projectId, unique('agent'));
+
+    await page.goto(`/projects/${projectId}/triggers`);
+    await page.getByTestId('new-trigger').click();
+
+    await page.locator('#t-name').fill('Push sur main');
+    // L'agent publié est le seul choix proposé : un brouillon n'est pas lançable.
+    await page.getByTestId('trigger-agent').selectOption({ index: 1 });
+    await page.locator('#t-branches').fill('main');
+    await page.getByTestId('submit-trigger').click();
+
+    // Le secret vient du serveur, qui ne le rendra plus jamais.
+    await expect(page.getByTestId('secret-value')).toBeVisible({ timeout: 20_000 });
+    const secret = (await page.getByTestId('secret-value').textContent())!.trim();
+    expect(secret.length).toBeGreaterThan(20);
+    await expect(page.getByTestId('hook-url')).toContainText('/api/hooks/');
+
+    await page.getByTestId('dismiss-secret').click();
+    await expect(page.getByTestId('revealed-secret')).toHaveCount(0);
+
+    // Rechargée, la page montre le déclencheur — et plus le secret.
+    await page.reload();
+    await expect(page.getByTestId('trigger-row')).toHaveCount(1, { timeout: 20_000 });
+    await expect(page.locator('body')).not.toContainText(secret);
+  });
+
+  test('an unusable cron expression is refused with the reason, not a generic failure', async ({ page }) => {
+    await register(page);
+    const projectId = await createProject(page, unique('proj'));
+    await createPublishedAgent(page, projectId, unique('agent'));
+
+    await page.goto(`/projects/${projectId}/triggers`);
+    await page.getByTestId('new-trigger').click();
+    await page.locator('#t-name').fill('Planification impossible');
+    await page.getByTestId('trigger-agent').selectOption({ index: 1 });
+    await page.getByTestId('type-cron').click();
+    await page.locator('#t-cron').fill('tous les lundis');
+    await page.getByTestId('submit-trigger').click();
+
+    // Le message du serveur nomme ce qu'il n'a pas compris : c'est le seul moyen de corriger.
+    await expect(page.getByTestId('submit-error')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('submit-error')).toContainText(/cron|field|value/i);
+  });
+
+  test('a cron trigger shows the next occurrence the server computed', async ({ page }) => {
+    await register(page);
+    const projectId = await createProject(page, unique('proj'));
+    await createPublishedAgent(page, projectId, unique('agent'));
+
+    await page.goto(`/projects/${projectId}/triggers`);
+    await page.getByTestId('new-trigger').click();
+    await page.locator('#t-name').fill('Rapport quotidien');
+    await page.getByTestId('trigger-agent').selectOption({ index: 1 });
+    await page.getByTestId('type-cron').click();
+    await page.locator('#t-cron').fill('0 9 * * *');
+    await page.locator('#t-tz').fill('Europe/Paris');
+    await page.getByTestId('submit-trigger').click();
+
+    const row = page.getByTestId('trigger-row');
+    await expect(row).toHaveCount(1, { timeout: 20_000 });
+    await expect(row).toContainText('0 9 * * *');
+    await expect(row).toContainText('Europe/Paris');
+    // L'échéance est calculée par le serveur à l'écriture : la voir ici prouve qu'elle a été
+    // persistée, pas seulement acceptée.
+    await expect(page.getByTestId('trigger-next-run')).toBeVisible();
+
+    // Désactiver efface l'échéance : la laisser ferait repartir le déclencheur au réveil avec
+    // toutes les occurrences manquées.
+    await page.getByTestId('toggle-trigger').click();
+    await expect(page.getByTestId('trigger-inactive')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('trigger-next-run')).toHaveCount(0);
+  });
+});

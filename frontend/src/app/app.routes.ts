@@ -60,6 +60,15 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'projects/:id/triggers',
+    loadComponent: () =>
+      import('./pages/projects/project-triggers/project-triggers.component').then(
+        (m) => m.ProjectTriggersComponent,
+      ),
+    title: 'Agent Host — Triggers',
+    canActivate: [authGuard],
+  },
+  {
     path: 'projects/:id',
     loadComponent: () =>
       import('./pages/projects/project-detail/project-detail.component').then(

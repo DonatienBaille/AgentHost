@@ -30,6 +30,13 @@
           {{ 'projectDetail.agents' | translate }}
         </a>
         <a
+          data-testid="link-triggers"
+          [routerLink]="['/projects', proj.id, 'triggers']"
+          class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded font-medium transition"
+        >
+          {{ 'projectDetail.triggers' | translate }}
+        </a>
+        <a
           data-testid="link-webhooks"
           [routerLink]="['/admin/webhooks', proj.id]"
           class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded font-medium transition"

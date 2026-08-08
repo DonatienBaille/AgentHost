@@ -69,3 +69,38 @@ export interface AnswerQuestionRequest {
   questionId: string;
   answer: string;
 }
+
+/**
+ * Un nœud de l'arbre de chaînage (feuille de route, lot 4).
+ *
+ * `agentName` est résolu par le serveur : un identifiant seul n'apprend rien à qui lit l'arbre, et
+ * l'IHM ne peut pas résoudre trente identifiants sans trente appels.
+ */
+export interface RunTreeNode {
+  id: string;
+  number: number;
+  agentId: string;
+  agentName: string | null;
+  status: string;
+  triggeredByType: string;
+  parentRunId: string | null;
+  chainDepth: number;
+  budgetUsedUsd: number | null;
+  durationMs: number | null;
+  createdAt: string;
+  children: RunTreeNode[];
+}
+
+/**
+ * L'arbre complet auquel un run appartient, et ses totaux.
+ *
+ * Les totaux sont la question qu'on se pose devant une cascade : ce que l'ensemble a coûté, pas ce
+ * qu'a coûté le maillon qu'on regarde.
+ */
+export interface RunTree {
+  rootRunId: string;
+  root: RunTreeNode | null;
+  totalRuns: number;
+  totalBudgetUsedUsd: number;
+  maxDepth: number;
+}

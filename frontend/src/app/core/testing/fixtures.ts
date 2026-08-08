@@ -15,6 +15,9 @@ import {
   AuditFacets,
   AuditLogEntry,
   AuditPage,
+  RunTree,
+  RunTreeNode,
+  Trigger,
   ManifestValidationError,
   ManifestValidationFailure,
   ManifestValidationSuccess,
@@ -469,5 +472,61 @@ export function nonTrivialManifestDocument(): JsonObject {
       budget: { defaultMaxUsd: 2.5, hardMaxUsd: 7.5 },
       approvals: { beforeWrite: { requiredRole: 'maintainer', requiredCount: 2 } },
     },
+  };
+}
+
+export function trigger(overrides: Partial<Trigger> = {}): Trigger {
+  return {
+    id: 't1',
+    projectId: 'p1',
+    agentId: 'a1',
+    type: 'webhook',
+    name: 'Push sur main',
+    isActive: true,
+    inputs: {},
+    provider: 'github',
+    events: ['push'],
+    branches: ['main'],
+    webhookPath: '/api/hooks/t1',
+    cronExpression: null,
+    timeZone: 'UTC',
+    nextRunAt: null,
+    lastRunAt: null,
+    lastRunId: null,
+    createdAt: T0,
+    ...overrides,
+  };
+}
+
+export function runTreeNode(overrides: Partial<RunTreeNode> = {}): RunTreeNode {
+  return {
+    id: 'r1',
+    number: 1,
+    agentId: 'a1',
+    agentName: 'Agent A',
+    status: 'succeeded',
+    triggeredByType: 'manual',
+    parentRunId: null,
+    chainDepth: 0,
+    budgetUsedUsd: 0,
+    durationMs: 1000,
+    createdAt: T0,
+    children: [],
+    ...overrides,
+  };
+}
+
+/** Un arbre cohérent par défaut : totaux dérivés des nœuds fournis, pas inventés. */
+export function runTree(overrides: Partial<RunTree> = {}): RunTree {
+  const root = overrides.root ?? runTreeNode();
+  const flatten = (node: RunTreeNode): RunTreeNode[] => [node, ...node.children.flatMap(flatten)];
+  const all = flatten(root);
+  return {
+    rootRunId: root.id,
+    root,
+    totalRuns: all.length,
+    totalBudgetUsedUsd: all.reduce((sum, n) => sum + (n.budgetUsedUsd ?? 0), 0),
+    maxDepth: Math.max(...all.map((n) => n.chainDepth)),
+    ...overrides,
   };
 }

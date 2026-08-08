@@ -283,6 +283,50 @@
         </div>
       </div>
 
+      <!-- Arbre de chaînage (lot 4). N'apparaît que si ce run fait partie d'une cascade : un
+           arbre d'un seul nœud n'apprendrait rien. -->
+      @if (hasChain()) {
+        @let tree = runTree()!;
+        <div data-testid="run-chain" class="bg-gray-800 rounded-lg p-4">
+          <h2 class="text-lg font-semibold mb-1">{{ 'runDetail.chain' | translate }}</h2>
+          <!-- Les totaux d'abord : devant une cascade, la question est ce que L'ENSEMBLE a coûté,
+               pas ce qu'a coûté le maillon qu'on regarde. -->
+          <p data-testid="chain-summary" class="text-xs text-gray-400 mb-3">
+            {{ 'runDetail.chainSummary' | translate: {
+              runs: tree.totalRuns,
+              cost: (tree.totalBudgetUsedUsd | number: '1.2-2'),
+              depth: tree.maxDepth
+            } }}
+          </p>
+
+          <div class="space-y-1">
+            @for (row of treeRows(); track row.node.id) {
+              <div
+                data-testid="chain-node"
+                class="flex items-center gap-2 text-sm rounded px-2 py-1"
+                [class.bg-blue-900]="row.node.id === run()?.id"
+                [style.margin-left.rem]="row.depth"
+              >
+                @if (row.depth > 0) {
+                  <span class="text-gray-600 select-none">└</span>
+                }
+                <a
+                  [routerLink]="['/runs', row.node.id]"
+                  class="text-blue-400 hover:text-blue-300 font-mono text-xs"
+                >#{{ row.node.number }}</a>
+                <span class="text-gray-300 truncate">{{ row.node.agentName ?? row.node.agentId }}</span>
+                <span class="text-xs text-gray-500">{{ row.node.status }}</span>
+                @if (row.node.triggeredByType === 'chain') {
+                  <span data-testid="chain-badge" class="text-xs px-1.5 rounded bg-gray-700 text-gray-300">
+                    {{ 'runDetail.chained' | translate }}
+                  </span>
+                }
+              </div>
+            }
+          </div>
+        </div>
+      }
+
       <!-- SignalR Connection Status -->
       <div
         class="px-3 py-2 rounded text-xs font-mono"

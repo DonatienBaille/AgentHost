@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe, UpperCasePipe } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { TranslatePipe } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
@@ -8,7 +8,7 @@ import { RunService } from '../../services/run.service';
 import { SignalRService } from '../../services/signalr.service';
 import { ArtifactService } from '../../services/artifact.service';
 import { AuthService } from '../../services/auth.service';
-import { Approval, Artifact, RunEvent, UserRole } from '../../core/models';
+import { Approval, Artifact, RunEvent, RunTreeNode, UserRole } from '../../core/models';
 import { approvalBadgeClass, statusBadgeClass } from '../../core/utils/status';
 import { hasRoleAtLeast } from '../../core/utils/roles';
 
@@ -32,7 +32,7 @@ const DEFAULT_REQUIRED_ROLE: UserRole = 'developer';
 @Component({
   selector: 'app-run-detail',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, UpperCasePipe, FormsModule, TranslatePipe],
+  imports: [DatePipe, DecimalPipe, UpperCasePipe, FormsModule, RouterLink, TranslatePipe],
   templateUrl: './run-detail.component.html',
   styleUrls: ['./run-detail.component.css'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -45,6 +45,32 @@ export class RunDetailComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
 
   readonly run = this.runService.currentRun;
+
+  /** L'arbre de chaînage, quand ce run en fait partie (lot 4). */
+  readonly runTree = this.runService.runTree;
+
+  /**
+   * L'arbre à plat, prêt à rendre : profondeur portée par chaque ligne.
+   *
+   * Un gabarit Angular ne peut pas se rappeler lui-même sans composant dédié ; aplatir en
+   * profondeur d'abord donne exactement le même rendu — l'indentation vient de `depth` — pour un
+   * composant de moins et aucune récursion à déboguer.
+   */
+  readonly treeRows = computed<{ node: RunTreeNode; depth: number }[]>(() => {
+    const tree = this.runTree();
+    if (!tree?.root) return [];
+
+    const rows: { node: RunTreeNode; depth: number }[] = [];
+    const walk = (node: RunTreeNode, depth: number): void => {
+      rows.push({ node, depth });
+      for (const child of node.children) walk(child, depth + 1);
+    };
+    walk(tree.root, 0);
+    return rows;
+  });
+
+  /** Un arbre d'un seul nœud n'est pas une cascade : l'afficher n'apprendrait rien. */
+  readonly hasChain = computed(() => (this.runTree()?.totalRuns ?? 0) > 1);
   readonly events = signal<RunEvent[]>([]);
   readonly connectionState = this.signalRService.connectionState;
 
@@ -103,6 +129,9 @@ export class RunDetailComponent implements OnInit, OnDestroy {
         this.loadApprovals(id);
         this.joinLiveRun(id);
         this.artifactService.listArtifacts(id).catch((err) => console.error(err));
+        // L'arbre de chaînage (lot 4). Chargé sans bloquer et sans remonter d'erreur : c'est un
+        // complément à la fiche, pas la fiche elle-même.
+        void this.runService.fetchRunTree(id);
       }
     });
   }

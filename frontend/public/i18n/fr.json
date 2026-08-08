@@ -73,7 +73,10 @@
     "answerPlaceholder": "Votre réponse",
     "decisionFailed": "La décision n'a pas pu être enregistrée.",
     "answerFailed": "La réponse n'a pas pu être enregistrée.",
-    "approvalHistory": "Historique des validations"
+    "approvalHistory": "Historique des validations",
+    "chain": "Chaîne de runs",
+    "chainSummary": "{{runs}} runs · {{cost}} $ au total · profondeur {{depth}}",
+    "chained": "chaîné"
   },
   "newRun": {
     "title": "Nouveau run",
@@ -116,7 +119,8 @@
     "noRuns": "Aucun run pour ce projet.",
     "memory": "Mémoire du projet",
     "agents": "Agents",
-    "webhooks": "Webhooks"
+    "webhooks": "Webhooks",
+    "triggers": "Déclencheurs"
   },
   "login": {
     "signIn": "Se connecter",
@@ -283,7 +287,11 @@
     "approveRun": "Échec de l'enregistrement de la décision.",
     "answerQuestion": "Échec de l'envoi de la réponse.",
     "loadArtifacts": "Échec du chargement des artefacts.",
-    "loadMetrics": "Échec du chargement des indicateurs."
+    "loadMetrics": "Échec du chargement des indicateurs.",
+    "loadTriggers": "Impossible de charger les déclencheurs.",
+    "createTrigger": "Impossible de créer le déclencheur.",
+    "updateTrigger": "Impossible de modifier le déclencheur.",
+    "deleteTrigger": "Impossible de supprimer le déclencheur."
   },
   "approvalType": {
     "gate": "Validation",
@@ -446,5 +454,37 @@
       "failureRate": "L'agent « {{agent}} » échoue sur {{percent}} % de ses runs.",
       "approvalStale": "Une demande d'approbation attend depuis {{hours}} h."
     }
+  },
+  "triggers": {
+    "title": "Déclencheurs",
+    "subtitle": "Ce qui fait partir un agent sans que personne ne clique : une livraison de forge, ou une échéance.",
+    "newTrigger": "Nouveau déclencheur",
+    "name": "Nom",
+    "agent": "Agent",
+    "chooseAgent": "Choisir un agent…",
+    "noPublishedAgent": "Aucun agent publié dans ce projet : un brouillon n'est pas lançable.",
+    "type": "Type",
+    "typeWebhook": "Webhook",
+    "typeCron": "Planifié",
+    "provider": "Émetteur",
+    "providerGeneric": "Générique",
+    "events": "Événements",
+    "branches": "Branches",
+    "emptyMeansAll": "Vide = tout accepter.",
+    "cronExpression": "Expression cron",
+    "cronHint": "Cinq champs : minute heure jour mois jour-de-semaine.",
+    "timeZone": "Fuseau horaire",
+    "timeZoneHint": "« Tous les jours à 9 h » n'a pas de sens sans fuseau.",
+    "secretOnce": "Secret de « {{name}} » — affiché une seule fois, il n'est stocké que chiffré.",
+    "secret": "Secret",
+    "hookUrl": "URL à configurer chez l'émetteur",
+    "filterSummary": "Événements : {{events}} · Branches : {{branches}}",
+    "all": "tous",
+    "nextRun": "Prochaine exécution",
+    "lastRun": "Dernière exécution",
+    "inactive": "Désactivé",
+    "enable": "Activer",
+    "disable": "Désactiver",
+    "empty": "Aucun déclencheur pour ce projet."
   }
 }

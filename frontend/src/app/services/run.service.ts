@@ -10,6 +10,7 @@ import {
   CreateRunRequest,
   Run,
   RunEvent,
+  RunTree,
 } from '../core/models';
 
 const BASE_URL = `${environment.apiUrl}/api/runs`;
@@ -23,6 +24,9 @@ export class RunService {
   readonly isLoading = signal(false);
   readonly error = signal<string | null>(null);
   readonly currentRunId = signal<string | null>(null);
+
+  /** L'arbre de chaînage du run affiché, quand il en a un (lot 4). */
+  readonly runTree = signal<RunTree | null>(null);
 
   // Computed (reactive, derived from signals)
   readonly currentRun = computed(() => {
@@ -96,6 +100,21 @@ export class RunService {
       this.error.set('errors.loadRun');
     } finally {
       this.isLoading.set(false);
+    }
+  }
+
+  /**
+   * L'arbre de chaînage auquel ce run appartient (feuille de route, lot 4).
+   *
+   * Un échec n'est pas signalé comme une erreur de page : l'arbre est un complément à la fiche du
+   * run, et le faire apparaître en rouge laisserait croire que le run lui-même n'a pas pu être lu.
+   * Sans arbre, le panneau ne s'affiche simplement pas.
+   */
+  async fetchRunTree(id: string): Promise<void> {
+    try {
+      this.runTree.set(await firstValueFrom(this.http.get<RunTree>(`${BASE_URL}/${id}/tree`)));
+    } catch {
+      this.runTree.set(null);
     }
   }
 

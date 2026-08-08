@@ -11,7 +11,7 @@ import { AuthService } from '../../services/auth.service';
 import { ConnectionState, SignalRService } from '../../services/signalr.service';
 import { ArtifactService } from '../../services/artifact.service';
 import { Approval, Artifact, Run, RunEvent, UserRole } from '../../core/models';
-import { approval, run, runEvent, user } from '../../core/testing/fixtures';
+import { approval, run, runEvent, runTree, runTreeNode, user } from '../../core/testing/fixtures';
 
 describe('RunDetailComponent approval gating', () => {
   let component: RunDetailComponent;
@@ -464,6 +464,78 @@ describe('RunDetailComponent live updates', () => {
       expect(el('submit-answer')).not.toBeNull();
       expect(el('approve-run')).toBeNull();
       expect(component.approvalOptions()).toEqual(['oui', 'non']);
+    });
+  });
+
+  /**
+   * L'arbre de chaînage (lot 4).
+   *
+   * Le panneau ne s'affiche que si ce run fait partie d'une cascade : un arbre d'un seul nœud
+   * n'apprendrait rien, et l'afficher quand même ajouterait une section vide à toutes les fiches.
+   */
+  describe('chain tree', () => {
+    /** Une cascade racine → enfant → petit-enfant, dont le run affiché est le petit-enfant. */
+    function cascade() {
+      const grandchild = runTreeNode({
+        id: 'r1',
+        number: 3,
+        chainDepth: 2,
+        parentRunId: 'child',
+        triggeredByType: 'chain',
+        budgetUsedUsd: 1,
+      });
+      const child = runTreeNode({
+        id: 'child',
+        number: 2,
+        chainDepth: 1,
+        parentRunId: 'root',
+        triggeredByType: 'chain',
+        budgetUsedUsd: 2,
+        children: [grandchild],
+      });
+      return runTree({ root: runTreeNode({ id: 'root', number: 1, budgetUsedUsd: 3, children: [child] }) });
+    }
+
+    it('stays hidden for a run that is not part of a chain', async () => {
+      await setup('owner');
+      runService.runTree.set(runTree());
+      fixture.detectChanges();
+
+      expect(el('run-chain')).toBeNull();
+    });
+
+    it('renders every node of the cascade, deepest included', async () => {
+      await setup('owner');
+      runService.runTree.set(cascade());
+      fixture.detectChanges();
+
+      expect(all('chain-node').length).toBe(3);
+      // Aplati en profondeur d'abord : l'ordre de lecture est celui de l'arbre, pas celui de la
+      // base.
+      expect(all('chain-node')[0].textContent).toContain('#1');
+      expect(all('chain-node')[2].textContent).toContain('#3');
+      // Deux maillons sur trois sont chaînés ; la racine ne l'est pas.
+      expect(all('chain-badge').length).toBe(2);
+    });
+
+    it('reports the totals of the whole cascade, not of the run being viewed', async () => {
+      await setup('owner');
+      runService.runTree.set(cascade());
+      fixture.detectChanges();
+
+      // Devant une cascade, la question est ce que L'ENSEMBLE a coûté.
+      expect(component.runTree()!.totalRuns).toBe(3);
+      expect(component.runTree()!.totalBudgetUsedUsd).toBe(6);
+      expect(component.runTree()!.maxDepth).toBe(2);
+      expect(el('chain-summary')).not.toBeNull();
+    });
+
+    it('indents each node by its depth', async () => {
+      await setup('owner');
+      runService.runTree.set(cascade());
+      fixture.detectChanges();
+
+      expect(component.treeRows().map((r) => r.depth)).toEqual([0, 1, 2]);
     });
   });
 });

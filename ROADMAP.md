@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-433 tests backend, 745 tests frontend, 18 tests end-to-end Playwright, build sans warning.
+516 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
 (Chiffres mesurés en exécutant les trois suites après fusion, pas déduits.)
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
@@ -340,17 +340,68 @@ a changé ce rôle, et quand » sans feuilleter.
 
 ## Lot 4 — Combler la spécification
 
-- **Déclencheurs.** `TriggeredByType` prévoit `webhook`, `cron`, `api` et `chain` ; seuls `manual`
-  et `api` fonctionnent. Manquent : les **webhooks entrants** (un push GitHub qui lance un agent,
-  avec vérification de signature) et la **planification cron**.
-- **Chaînage de runs.** Le schéma porte déjà `parent_run_id` et `root_run_id`, l'enum a `chain`,
-  mais rien ne les exploite : un agent qui en déclenche un autre est une capacité à moitié
-  modélisée. Inclut la visualisation de l'arbre de runs.
+### 4.1 Déclencheurs entrants ✅ livré
+
+`TriggeredByType` déclarait `webhook`, `cron`, `api` et `chain` ; seuls `manual` et `api`
+fonctionnaient. Un agent ne pouvait donc être lancé que par quelqu'un qui clique ou qui appelle
+l'API avec un jeton — c'est-à-dire jamais tout seul, ce qui est pourtant la raison d'être d'une
+plateforme d'agents autonomes.
+
+**Webhooks entrants.** `POST /api/hooks/{id}`, anonyme par nécessité (c'est une forge qui appelle),
+autorisé par la signature. Trois émetteurs, parce qu'on ne choisit pas comment GitHub signe : HMAC
+SHA-256 sur le corps **brut** pour GitHub et le format générique, jeton en clair pour GitLab. Le
+`sha1` hérité de GitHub est refusé. L'endpoint lit un `byte[]` — re-sérialiser le JSON changerait
+espaces, ordre des clés et échappement, et toutes les signatures deviendraient fausses. Corps borné
+à 1 Mio, comparaison à temps constant, déduplication des réémissions portée par la clé primaire de
+`trigger_deliveries` (une vérification applicative laisserait passer deux réémissions simultanées).
+Codes de retour pensés pour l'émetteur : 200 sur doublon et sur livraison filtrée, 422 sur refus
+métier, 404 indistinctement pour inconnu / supprimé / désactivé.
+
+**Planification cron.** Analyseur cinq champs écrit dans le dépôt — même arbitrage que pour le TOTP :
+le besoin est un sous-ensemble délimité qui se teste exhaustivement, et les bibliothèques du domaine
+apportent en prime un moteur de planification et leurs propres décisions sur les fuseaux. Le fuseau
+est porté par le déclencheur (« tous les jours à 9 h » n'a pas de sens sans lui), la règle POSIX du
+OU entre jour-du-mois et jour-de-semaine est respectée, et une heure locale inexistante (passage à
+l'heure d'été) est sautée plutôt qu'inventée. Le planificateur bat toutes les 20 s et réserve les
+échéances par un `UPDATE … WHERE next_run_at = @Expected RETURNING` : plusieurs répliques voient la
+même échéance au même battement, et seule l'atomicité de cette instruction empêche le double
+lancement — aucun verrou distribué, la ligne elle-même est le jeton. Les occurrences manquées ne
+sont pas rattrapées : un backend arrêté trois jours ne doit pas relancer soixante-douze fois un
+agent horaire.
+
+**IHM.** `pages/projects/project-triggers/` : un formulaire pour les deux natures, le secret affiché
+une seule fois avec l'URL à coller chez l'émetteur, l'échéance suivante calculée par le serveur,
+activation/désactivation et suppression réservées à `maintainer`.
+
+**Défaut trouvé en cours de vérification.** La première version validait le projet APRÈS l'insertion :
+poser un déclencheur sur l'agent d'un autre locataire rendait bien un 404, en laissant derrière lui
+un déclencheur parfaitement fonctionnel, avec son secret et son URL. La validation est remontée
+avant toute écriture, et un test vérifie qu'il ne reste rien en base — le code de retour ne suffisait
+pas à le prouver.
+
+### 4.2 Chaînage de runs ✅ livré
+
+`parent_run_id` et `root_run_id` étaient dans le schéma depuis l'origine et rien ne les écrivait.
+Pire, la seule ligne qui touchait `root_run_id` posait `root = parent` : juste à la profondeur 1 et
+faux ensuite — le petit-enfant aurait eu pour racine son parent, et l'arbre se serait scindé en deux
+moitiés que rien ne relie, chacune ayant l'air correcte séparément.
+
+`POST /api/agent/runs/{id}/chain` (jeton de run, non transitif) et `GET /api/runs/{id}/tree`,
+lisible depuis n'importe quel membre de l'arbre — on arrive sur un run parce qu'il a échoué ou coûté
+cher, et exiger la racine obligerait à la connaître déjà. Trois limites — profondeur 5, éventail 10,
+arbre 50 — qui sont le garde-fou et non un raffinement : un agent qui se chaîne lui-même est une
+boucle infinie dont chaque maillon est légitime. Un run chaîné doit viser un agent du même projet.
+L'arbre est rendu dans la fiche du run, avec les totaux de la cascade.
+
+### 4.3 Reste à faire dans ce lot
+
 - **Phase P3 — optimisation**, non entamée : cache Redis réellement utilisé (il n'est aujourd'hui
   que backplane SignalR), pools de conteneurs pré-chauffés pour supprimer la latence de démarrage,
   réutilisation de workspaces entre runs d'un même projet.
 - **Observabilité opérationnelle** (§14) : tableaux de bord et alertes côté exploitation, distincts
   du lot 3 qui vise l'utilisateur final.
+- **Purge de `trigger_deliveries`** : l'index sur `received_at` la rend bon marché, mais rien ne
+  l'exécute — un `DELETE … WHERE received_at < NOW() - INTERVAL '30 days'` reste à planifier.
 
 ---
 

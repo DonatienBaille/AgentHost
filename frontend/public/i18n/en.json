@@ -73,7 +73,10 @@
     "answerPlaceholder": "Your answer",
     "decisionFailed": "The decision could not be recorded.",
     "answerFailed": "The answer could not be recorded.",
-    "approvalHistory": "Approval history"
+    "approvalHistory": "Approval history",
+    "chain": "Run chain",
+    "chainSummary": "{{runs}} runs · ${{cost}} total · depth {{depth}}",
+    "chained": "chained"
   },
   "newRun": {
     "title": "New run",
@@ -116,7 +119,8 @@
     "noRuns": "No runs for this project.",
     "memory": "Project memory",
     "agents": "Agents",
-    "webhooks": "Webhooks"
+    "webhooks": "Webhooks",
+    "triggers": "Triggers"
   },
   "login": {
     "signIn": "Sign in",
@@ -283,7 +287,11 @@
     "approveRun": "Failed to record the decision.",
     "answerQuestion": "Failed to send the answer.",
     "loadArtifacts": "Failed to load artifacts.",
-    "loadMetrics": "Failed to load the metrics."
+    "loadMetrics": "Failed to load the metrics.",
+    "loadTriggers": "Could not load triggers.",
+    "createTrigger": "Could not create the trigger.",
+    "updateTrigger": "Could not update the trigger.",
+    "deleteTrigger": "Could not delete the trigger."
   },
   "approvalType": {
     "gate": "Gate",
@@ -446,5 +454,37 @@
       "failureRate": "Agent “{{agent}}” is failing {{percent}}% of its runs.",
       "approvalStale": "An approval request has been waiting for {{hours}}h."
     }
+  },
+  "triggers": {
+    "title": "Triggers",
+    "subtitle": "What starts an agent without anyone clicking: a forge delivery, or a schedule.",
+    "newTrigger": "New trigger",
+    "name": "Name",
+    "agent": "Agent",
+    "chooseAgent": "Choose an agent…",
+    "noPublishedAgent": "No published agent in this project: a draft cannot be run.",
+    "type": "Type",
+    "typeWebhook": "Webhook",
+    "typeCron": "Scheduled",
+    "provider": "Provider",
+    "providerGeneric": "Generic",
+    "events": "Events",
+    "branches": "Branches",
+    "emptyMeansAll": "Empty = accept everything.",
+    "cronExpression": "Cron expression",
+    "cronHint": "Five fields: minute hour day-of-month month day-of-week.",
+    "timeZone": "Time zone",
+    "timeZoneHint": "“Every day at 9 am” means nothing without a time zone.",
+    "secretOnce": "Secret for “{{name}}” — shown once; it is only stored encrypted.",
+    "secret": "Secret",
+    "hookUrl": "URL to configure at the provider",
+    "filterSummary": "Events: {{events}} · Branches: {{branches}}",
+    "all": "all",
+    "nextRun": "Next run",
+    "lastRun": "Last run",
+    "inactive": "Disabled",
+    "enable": "Enable",
+    "disable": "Disable",
+    "empty": "No trigger for this project."
   }
 }

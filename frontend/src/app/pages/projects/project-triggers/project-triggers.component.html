@@ -1,0 +1,254 @@
+<!-- src/app/pages/projects/project-triggers/project-triggers.component.html -->
+
+<div class="p-6 max-w-5xl mx-auto">
+  <div class="flex items-center justify-between mb-2">
+    <h1 class="text-3xl font-bold">{{ 'triggers.title' | translate }}</h1>
+    @if (canManage()) {
+      <button
+        type="button"
+        data-testid="new-trigger"
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition"
+        (click)="toggleForm()"
+      >
+        {{ (showForm() ? 'common.cancel' : 'triggers.newTrigger') | translate }}
+      </button>
+    }
+  </div>
+  <p class="text-gray-400 mb-8">{{ 'triggers.subtitle' | translate }}</p>
+
+  <!-- Le secret ne repassera plus : le bandeau reste jusqu'à ce qu'on le ferme explicitement.
+       Le faire disparaître à la première navigation le perdrait définitivement, et il n'y a pas
+       de « secret oublié » pour un webhook. -->
+  @if (revealedSecret(); as revealed) {
+    <div data-testid="revealed-secret" class="bg-amber-950/50 border border-amber-700 rounded-lg p-4 mb-6">
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0">
+          <p class="text-amber-200 font-medium mb-2">
+            {{ 'triggers.secretOnce' | translate: { name: revealed.name } }}
+          </p>
+          <div class="text-xs text-amber-300/80 mb-1">{{ 'triggers.hookUrl' | translate }}</div>
+          <code data-testid="hook-url" class="block text-sm font-mono break-all bg-gray-900 rounded px-3 py-2 mb-3">
+            {{ absoluteHookUrl(revealed.path) }}
+          </code>
+          <div class="text-xs text-amber-300/80 mb-1">{{ 'triggers.secret' | translate }}</div>
+          <code data-testid="secret-value" class="block text-sm font-mono break-all bg-gray-900 rounded px-3 py-2">
+            {{ revealed.secret }}
+          </code>
+        </div>
+        <button
+          type="button"
+          data-testid="dismiss-secret"
+          class="shrink-0 px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition"
+          (click)="dismissSecret()"
+        >
+          {{ 'common.dismiss' | translate }}
+        </button>
+      </div>
+    </div>
+  }
+
+  @if (error()) {
+    <div data-testid="triggers-error" class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+      <p class="text-red-200">{{ error()! | translate }}</p>
+    </div>
+  }
+
+  @if (showForm() && canManage()) {
+    <form [formGroup]="form" (ngSubmit)="submit()" class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 space-y-4">
+      @if (submitError()) {
+        <!-- Le message du serveur, pas un « une erreur est survenue » : c'est lui qui dit quel
+             champ de l'expression cron est fautif. -->
+        <div data-testid="submit-error" class="bg-red-900/50 border border-red-700 rounded-lg p-3 text-sm text-red-200">
+          {{ submitError()! | translate }}
+        </div>
+      }
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="t-name">{{ 'triggers.name' | translate }}</label>
+          <input id="t-name" type="text" formControlName="name" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1" for="t-agent">{{ 'triggers.agent' | translate }}</label>
+          <select id="t-agent" data-testid="trigger-agent" formControlName="agentId" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm">
+            <option value="">{{ 'triggers.chooseAgent' | translate }}</option>
+            @for (agent of publishedAgents(); track agent.id) {
+              <option [value]="agent.id">{{ agent.name }}</option>
+            }
+          </select>
+          @if (publishedAgents().length === 0) {
+            <!-- Un agent brouillon n'est pas lançable : le dire ici évite un déclencheur qui ne
+                 produira jamais qu'un refus. -->
+            <p data-testid="no-published-agent" class="text-xs text-amber-400 mt-1">
+              {{ 'triggers.noPublishedAgent' | translate }}
+            </p>
+          }
+        </div>
+      </div>
+
+      <div>
+        <div class="text-sm text-gray-400 mb-1">{{ 'triggers.type' | translate }}</div>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            data-testid="type-webhook"
+            class="px-3 py-1.5 rounded text-sm transition"
+            [class.bg-blue-600]="selectedType() === 'webhook'"
+            [class.bg-gray-900]="selectedType() !== 'webhook'"
+            [class.border]="selectedType() !== 'webhook'"
+            [class.border-gray-700]="selectedType() !== 'webhook'"
+            (click)="onTypeChange('webhook')"
+          >
+            {{ 'triggers.typeWebhook' | translate }}
+          </button>
+          <button
+            type="button"
+            data-testid="type-cron"
+            class="px-3 py-1.5 rounded text-sm transition"
+            [class.bg-blue-600]="selectedType() === 'cron'"
+            [class.bg-gray-900]="selectedType() !== 'cron'"
+            [class.border]="selectedType() !== 'cron'"
+            [class.border-gray-700]="selectedType() !== 'cron'"
+            (click)="onTypeChange('cron')"
+          >
+            {{ 'triggers.typeCron' | translate }}
+          </button>
+        </div>
+      </div>
+
+      @if (selectedType() === 'webhook') {
+        <div data-testid="webhook-fields" class="grid gap-4 sm:grid-cols-3">
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="t-provider">{{ 'triggers.provider' | translate }}</label>
+            <select id="t-provider" formControlName="provider" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm">
+              <option value="github">GitHub</option>
+              <option value="gitlab">GitLab</option>
+              <option value="generic">{{ 'triggers.providerGeneric' | translate }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="t-events">{{ 'triggers.events' | translate }}</label>
+            <input id="t-events" type="text" formControlName="events" placeholder="push, pull_request" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'triggers.emptyMeansAll' | translate }}</p>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="t-branches">{{ 'triggers.branches' | translate }}</label>
+            <input id="t-branches" type="text" formControlName="branches" placeholder="main, release/*" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'triggers.emptyMeansAll' | translate }}</p>
+          </div>
+        </div>
+      } @else {
+        <div data-testid="cron-fields" class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="t-cron">{{ 'triggers.cronExpression' | translate }}</label>
+            <input id="t-cron" type="text" formControlName="cronExpression" placeholder="0 9 * * 1-5" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm font-mono" />
+            <p class="text-xs text-gray-500 mt-1">{{ 'triggers.cronHint' | translate }}</p>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1" for="t-tz">{{ 'triggers.timeZone' | translate }}</label>
+            <input id="t-tz" type="text" formControlName="timeZone" placeholder="Europe/Paris" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm" />
+            <!-- « Tous les jours à 9 h » n'a pas de sens sans fuseau. -->
+            <p class="text-xs text-gray-500 mt-1">{{ 'triggers.timeZoneHint' | translate }}</p>
+          </div>
+        </div>
+      }
+
+      <button
+        type="submit"
+        data-testid="submit-trigger"
+        [disabled]="isSubmitting() || form.invalid"
+        class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded font-medium transition"
+      >
+        {{ (isSubmitting() ? 'common.saving' : 'common.create') | translate }}
+      </button>
+    </form>
+  }
+
+  @if (isLoading()) {
+    <div class="flex justify-center py-8">
+      <div data-testid="triggers-spinner" class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+  }
+
+  <div class="space-y-3">
+    @for (trigger of triggers(); track trigger.id) {
+      <div
+        data-testid="trigger-row"
+        class="bg-gray-800 border border-gray-700 rounded-lg p-4"
+        [class.opacity-60]="!trigger.isActive"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="font-medium">{{ trigger.name }}</span>
+              <span class="text-xs px-2 py-0.5 rounded bg-gray-700">
+                {{ (trigger.type === 'webhook' ? 'triggers.typeWebhook' : 'triggers.typeCron') | translate }}
+              </span>
+              @if (!trigger.isActive) {
+                <span data-testid="trigger-inactive" class="text-xs px-2 py-0.5 rounded bg-gray-900 border border-gray-600 text-gray-400">
+                  {{ 'triggers.inactive' | translate }}
+                </span>
+              }
+            </div>
+            <div class="text-sm text-gray-400">{{ agentName(trigger.agentId) }}</div>
+
+            @if (trigger.type === 'webhook') {
+              <code data-testid="trigger-hook-path" class="block text-xs font-mono text-gray-500 mt-2 break-all">
+                {{ absoluteHookUrl(trigger.webhookPath ?? '') }}
+              </code>
+              <div class="text-xs text-gray-500 mt-1">
+                {{ 'triggers.filterSummary' | translate: {
+                  events: trigger.events.length ? trigger.events.join(', ') : ('triggers.all' | translate),
+                  branches: trigger.branches.length ? trigger.branches.join(', ') : ('triggers.all' | translate)
+                } }}
+              </div>
+            } @else {
+              <div class="text-sm text-gray-500 mt-2">
+                <code class="font-mono">{{ trigger.cronExpression }}</code>
+                <span class="ml-2">({{ trigger.timeZone }})</span>
+              </div>
+              @if (trigger.nextRunAt) {
+                <div data-testid="trigger-next-run" class="text-xs text-gray-500 mt-1">
+                  {{ 'triggers.nextRun' | translate }} : {{ trigger.nextRunAt | date: 'medium' }}
+                </div>
+              }
+            }
+
+            @if (trigger.lastRunAt) {
+              <div data-testid="trigger-last-run" class="text-xs text-gray-500 mt-1">
+                {{ 'triggers.lastRun' | translate }} : {{ trigger.lastRunAt | date: 'medium' }}
+              </div>
+            }
+          </div>
+
+          @if (canManage()) {
+            <div class="flex shrink-0 gap-2">
+              <button
+                type="button"
+                data-testid="toggle-trigger"
+                [disabled]="busyTriggerId() === trigger.id"
+                class="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded transition"
+                (click)="toggleActive(trigger)"
+              >
+                {{ (trigger.isActive ? 'triggers.disable' : 'triggers.enable') | translate }}
+              </button>
+              <button
+                type="button"
+                data-testid="delete-trigger"
+                [disabled]="busyTriggerId() === trigger.id"
+                class="px-3 py-1.5 text-sm bg-red-900/60 hover:bg-red-900 disabled:opacity-50 rounded transition"
+                (click)="remove(trigger)"
+              >
+                {{ 'common.delete' | translate }}
+              </button>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  </div>
+
+  @if (!isLoading() && triggers().length === 0) {
+    <p data-testid="triggers-empty" class="text-gray-500 text-sm">{{ 'triggers.empty' | translate }}</p>
+  }
+</div>
