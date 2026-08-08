@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-516 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
+522 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
 (Chiffres mesurés en exécutant les trois suites après fusion, pas déduits.)
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
@@ -393,13 +393,42 @@ arbre 50 — qui sont le garde-fou et non un raffinement : un agent qui se chaî
 boucle infinie dont chaque maillon est légitime. Un run chaîné doit viser un agent du même projet.
 L'arbre est rendu dans la fiche du run, avec les totaux de la cascade.
 
-### 4.3 Reste à faire dans ce lot
+### 4.3 Phase P3 — le cache Redis est réellement utilisé ✅ livré
 
-- **Phase P3 — optimisation**, non entamée : cache Redis réellement utilisé (il n'est aujourd'hui
-  que backplane SignalR), pools de conteneurs pré-chauffés pour supprimer la latence de démarrage,
-  réutilisation de workspaces entre runs d'un même projet.
+Redis était déployé depuis l'origine et rangé par la spécification dans « cache/sessions », mais la
+seule chose qui s'en servait était le backplane SignalR : la ligne de cette feuille de route
+désignait exactement cet écart entre une dépendance déployée et une dépendance utile.
+
+`Infrastructure/AggregateCache.cs` met en cache **les quatre agrégats du tableau de bord**, et rien
+d'autre. Ils balayent `runs` sur trente à quatre-vingt-dix jours et l'écran porte un bouton
+« Actualiser » : c'est le cas d'école du travail refait à l'identique. Ni un run, ni un agent, ni un
+secret ne sont mis en cache — un cache sur des données qu'on lit pour agir doit être invalidé, et
+une invalidation oubliée coûte bien plus cher que la lecture qu'elle économisait.
+
+Trois décisions à connaître :
+
+- **Expiration seule (30 s), pas d'invalidation.** Un tableau de bord sur trente jours est une aide
+  à la décision, pas une console temps réel. Invalider à chaque transition de run rendrait le cache
+  inutile précisément quand il sert — sur une organisation active.
+- **La clé porte l'organisation ET la fenêtre.** Deux locataires qui partageraient une clé
+  partageraient leurs chiffres ; un test existe pour interdire ça.
+- **Sans Redis, le comportement est exactement celui d'avant.** `NoAggregateCache` passe tout au
+  calcul direct, et toute erreur Redis retombe sur la requête — un cache qui fait échouer la lecture
+  qu'il devait accélérer est pire que pas de cache du tout.
+
+6 tests, dont 5 contre un vrai Redis (sautés explicitement, jamais passés en silence, quand aucun ne
+répond — même dispositif que `DockerFactAttribute`).
+
+### 4.4 Reste à faire dans ce lot
+
+- **Pools de conteneurs pré-chauffés** et **réutilisation de workspaces** entre runs d'un même
+  projet : les deux exigent un runtime de conteneurs, que cet environnement n'a pas (voir
+  `docs/validation-reelle.md`, même famille que le point 1.3). Écrire ces chemins sans jamais les
+  exécuter produirait du code qui compile et dont personne ne sait s'il fonctionne.
 - **Observabilité opérationnelle** (§14) : tableaux de bord et alertes côté exploitation, distincts
-  du lot 3 qui vise l'utilisateur final.
+  du lot 3 qui vise l'utilisateur final. Les instruments existent (`AgentHost.Business` sur
+  `/metrics`) ; ce qui manque est le jeu de règles d'alerte et les tableaux de bord qui les
+  consomment.
 - **Purge de `trigger_deliveries`** : l'index sur `received_at` la rend bon marché, mais rien ne
   l'exécute — un `DELETE … WHERE received_at < NOW() - INTERVAL '30 days'` reste à planifier.
 

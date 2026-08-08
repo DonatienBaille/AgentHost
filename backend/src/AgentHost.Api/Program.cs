@@ -105,6 +105,13 @@ builder.Services.AddSingleton<IArtifactStorage>(artifactStorage);
 var redisConnection = ConnectRedis(builder.Configuration, Log.Logger);
 builder.Services.AddSingleton(new RedisConnectionHolder(redisConnection));
 
+// Cache d'agrégats (lot 4, phase P3). Redis n'était jusqu'ici que le backplane SignalR ; c'est
+// l'écart que la feuille de route appelait « cache Redis réellement utilisé ». Sans Redis, le
+// comportement reste EXACTEMENT celui d'avant : NoAggregateCache passe tout au calcul direct.
+builder.Services.AddSingleton<IAggregateCache>(sp => redisConnection is not null
+    ? new RedisAggregateCache(redisConnection, sp.GetRequiredService<Serilog.ILogger>())
+    : new NoAggregateCache());
+
 // ---- Repositories ----
 builder.Services.AddScoped<IRunRepository, RunRepository>();
 builder.Services.AddScoped<IRunEventRepository, RunEventRepository>();

@@ -31,6 +31,27 @@ public static class MetricsEndpoints
     /// <summary>Combien d'entrées au maximum dans un classement. Un top 50 n'est plus un top.</summary>
     private const int MaxLeaders = 20;
 
+    /// <summary>
+    /// Durée de vie des agrégats en cache (lot 4, phase P3).
+    ///
+    /// Trente secondes : un tableau de bord sur trente jours est une aide à la décision, pas une
+    /// console temps réel, et ce retard-là y est invisible. Assez long pour absorber une rafale de
+    /// clics sur « Actualiser » et les quatre appels simultanés d'un chargement de page ; assez
+    /// court pour qu'un run qui vient de finir apparaisse avant qu'on ait fini de se demander
+    /// pourquoi il n'apparaît pas.
+    /// </summary>
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// La clé d'un agrégat.
+    ///
+    /// L'organisation en fait partie, et ce n'est pas cosmétique : deux locataires qui partagent
+    /// une clé partagent leurs chiffres. La fenêtre aussi — sinon un passage de 30 à 7 jours
+    /// servirait les valeurs de l'autre fenêtre.
+    /// </summary>
+    private static string CacheKey(string endpoint, string orgId, int days) =>
+        $"metrics:{endpoint}:{orgId}:{days}";
+
     public static IEndpointRouteBuilder MapMetricsEndpoints(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api/metrics").WithTags("Metrics").RequireAuthorization();
@@ -53,10 +74,19 @@ public static class MetricsEndpoints
     private static async Task<Ok<MetricsOverview>> Overview(
         IDbConnectionFactory connectionFactory,
         ICallerContext caller,
+        IAggregateCache cache,
         CancellationToken ct,
         int days = DefaultWindowDays)
     {
         var window = ClampWindow(days);
+        return TypedResults.Ok(await cache.GetOrSetAsync(
+            CacheKey("overview", caller.OrgId, window), CacheTtl,
+            () => ComputeOverviewAsync(connectionFactory, caller.OrgId, window, ct), ct));
+    }
+
+    private static async Task<MetricsOverview> ComputeOverviewAsync(
+        IDbConnectionFactory connectionFactory, string orgId, int window, CancellationToken ct)
+    {
         using var db = connectionFactory.CreateConnection();
 
         // Un seul aller-retour : ces compteurs sont lus ensemble, et les séparer ferait diverger
@@ -73,16 +103,16 @@ public static class MetricsEndpoints
                 COALESCE(AVG(duration_ms) FILTER (WHERE duration_ms IS NOT NULL), 0) AS avg_duration_ms
             FROM runs
             WHERE org_id = @OrgId AND created_at >= NOW() - (@Days || ' days')::interval
-            """, new { caller.OrgId, Days = window }, cancellationToken: ct));
+            """, new { OrgId = orgId, Days = window }, cancellationToken: ct));
 
         var pendingApprovalSeconds = await db.ExecuteScalarAsync<double?>(new CommandDefinition("""
             SELECT COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - a.created_at))), 0)
             FROM approvals a
             JOIN runs r ON r.id = a.run_id
             WHERE r.org_id = @OrgId AND a.status = 'pending'
-            """, new { caller.OrgId }, cancellationToken: ct));
+            """, new { OrgId = orgId }, cancellationToken: ct));
 
-        return TypedResults.Ok(new MetricsOverview
+        return new MetricsOverview
         {
             WindowDays = window,
             TotalRuns = row.Total,
@@ -96,13 +126,13 @@ public static class MetricsEndpoints
             // Pas une moyenne : ce qui inquiète, c'est la demande qui attend depuis le plus
             // longtemps. Une moyenne basse masquerait une approbation oubliée depuis trois jours.
             OldestPendingApprovalSeconds = (long)(pendingApprovalSeconds ?? 0),
-        });
+        };
     }
 
     private static Task<Ok<List<AgentUsage>>> ByAgent(
-        IDbConnectionFactory connectionFactory, ICallerContext caller, CancellationToken ct,
-        int days = DefaultWindowDays) =>
-        Leaderboard<AgentUsage>(connectionFactory, caller, ct, days, """
+        IDbConnectionFactory connectionFactory, ICallerContext caller, IAggregateCache cache,
+        CancellationToken ct, int days = DefaultWindowDays) =>
+        Leaderboard<AgentUsage>(connectionFactory, caller, cache, "by-agent", ct, days, """
             SELECT r.agent_id AS AgentId,
                    COALESCE(MAX(a.name), r.agent_id)                          AS Name,
                    COUNT(*)                                                   AS Runs,
@@ -118,9 +148,9 @@ public static class MetricsEndpoints
             """);
 
     private static Task<Ok<List<ProjectUsage>>> ByProject(
-        IDbConnectionFactory connectionFactory, ICallerContext caller, CancellationToken ct,
-        int days = DefaultWindowDays) =>
-        Leaderboard<ProjectUsage>(connectionFactory, caller, ct, days, """
+        IDbConnectionFactory connectionFactory, ICallerContext caller, IAggregateCache cache,
+        CancellationToken ct, int days = DefaultWindowDays) =>
+        Leaderboard<ProjectUsage>(connectionFactory, caller, cache, "by-project", ct, days, """
             SELECT r.project_id AS ProjectId,
                    COALESCE(MAX(p.name), r.project_id)                        AS Name,
                    COUNT(*)                                                   AS Runs,
@@ -137,10 +167,18 @@ public static class MetricsEndpoints
 
     /// <summary>Une ligne par jour, pour tracer une courbe plutôt qu'afficher un total.</summary>
     private static async Task<Ok<List<DailyPoint>>> Daily(
-        IDbConnectionFactory connectionFactory, ICallerContext caller, CancellationToken ct,
-        int days = DefaultWindowDays)
+        IDbConnectionFactory connectionFactory, ICallerContext caller, IAggregateCache cache,
+        CancellationToken ct, int days = DefaultWindowDays)
     {
         var window = ClampWindow(days);
+        return TypedResults.Ok(await cache.GetOrSetAsync(
+            CacheKey("daily", caller.OrgId, window), CacheTtl,
+            () => ComputeDailyAsync(connectionFactory, caller.OrgId, window, ct), ct));
+    }
+
+    private static async Task<List<DailyPoint>> ComputeDailyAsync(
+        IDbConnectionFactory connectionFactory, string orgId, int window, CancellationToken ct)
+    {
         using var db = connectionFactory.CreateConnection();
 
         // generate_series et non GROUP BY seul : un jour sans run doit apparaître à zéro. Sans lui,
@@ -159,20 +197,29 @@ public static class MetricsEndpoints
                   AND date_trunc('day', r.created_at) = d.day
             GROUP BY d.day
             ORDER BY d.day
-            """, new { caller.OrgId, Days = window }, cancellationToken: ct));
+            """, new { OrgId = orgId, Days = window }, cancellationToken: ct));
 
-        return TypedResults.Ok(rows.ToList());
+        return rows.ToList();
     }
 
     private static async Task<Ok<List<T>>> Leaderboard<T>(
-        IDbConnectionFactory connectionFactory, ICallerContext caller, CancellationToken ct,
-        int days, string sql)
+        IDbConnectionFactory connectionFactory, ICallerContext caller, IAggregateCache cache,
+        string endpoint, CancellationToken ct, int days, string sql)
     {
-        using var db = connectionFactory.CreateConnection();
-        var rows = await db.QueryAsync<T>(new CommandDefinition(
-            sql, new { caller.OrgId, Days = ClampWindow(days), Limit = MaxLeaders },
-            cancellationToken: ct));
-        return TypedResults.Ok(rows.ToList());
+        var window = ClampWindow(days);
+        var orgId = caller.OrgId;
+
+        return TypedResults.Ok(await cache.GetOrSetAsync(
+            CacheKey(endpoint, orgId, window), CacheTtl,
+            async () =>
+            {
+                using var db = connectionFactory.CreateConnection();
+                var rows = await db.QueryAsync<T>(new CommandDefinition(
+                    sql, new { OrgId = orgId, Days = window, Limit = MaxLeaders },
+                    cancellationToken: ct));
+                return rows.ToList();
+            },
+            ct));
     }
 
     private sealed class OverviewRow
