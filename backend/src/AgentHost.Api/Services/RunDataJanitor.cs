@@ -1,3 +1,4 @@
+using Dapper;
 using AgentHost.Api.Infrastructure;
 using AgentHost.Api.Infrastructure.Storage;
 using AgentHost.Shared.Containers;
@@ -40,17 +41,31 @@ public class RunDataJanitor : BackgroundService
     private readonly TimeSpan _secretsGrace;
     private readonly TimeSpan _workspaceRetention;
     private readonly TimeSpan _artifactRetention;
+    private readonly TimeSpan _triggerDeliveryRetention;
+    private readonly IDbConnectionFactory _connectionFactory;
 
-    public RunDataJanitor(IConfiguration config, ILogger logger, IArtifactStorage artifactStorage, ContainerPathMapper paths)
+    public RunDataJanitor(
+        IConfiguration config,
+        ILogger logger,
+        IArtifactStorage artifactStorage,
+        ContainerPathMapper paths,
+        IDbConnectionFactory connectionFactory)
     {
         _logger = logger;
         _artifactStorage = artifactStorage;
         _workspaceRoot = paths.LocalWorkspaceRoot;
+        _connectionFactory = connectionFactory;
 
         _interval = TimeSpan.FromMinutes(ReadPositiveDouble(config, "Retention:SweepIntervalMinutes", 60));
         _secretsGrace = TimeSpan.FromMinutes(ReadPositiveDouble(config, "Retention:SecretsGraceMinutes", 60));
         _workspaceRetention = TimeSpan.FromHours(ReadPositiveDouble(config, "Retention:WorkspaceHours", 168));
         _artifactRetention = TimeSpan.FromDays(ReadPositiveDouble(config, "Retention:ArtifactDays", 0));
+
+        // Les livraisons de webhook ne servent qu'à la déduplication, dont la fenêtre utile est
+        // celle des réémissions d'une forge — quelques heures chez GitHub. Trente jours laissent
+        // une marge confortable ; au-delà, ce sont des lignes que plus rien ne consultera jamais.
+        _triggerDeliveryRetention = TimeSpan.FromDays(
+            ReadPositiveDouble(config, "Retention:TriggerDeliveryDays", 30));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -91,6 +106,46 @@ public class RunDataJanitor : BackgroundService
     {
         SweepRunDirectories();
         await SweepArtifactsAsync(ct);
+        await SweepTriggerDeliveriesAsync(ct);
+    }
+
+    /// <summary>
+    /// Purge les livraisons de webhook trop anciennes pour servir encore à la déduplication
+    /// (feuille de route, lot 4).
+    ///
+    /// <b>Pourquoi ces lignes doivent partir.</b> `trigger_deliveries` ne fait que grossir : une
+    /// ligne par livraison reçue, pour toujours. Sur un dépôt actif, c'est la seule table du schéma
+    /// dont la croissance n'est bornée par rien — ni par un nombre de runs, ni par un nombre
+    /// d'utilisateurs, seulement par le trafic entrant.
+    ///
+    /// <b>Pourquoi c'est sûr.</b> Ces lignes n'existent que pour reconnaître une réémission. Une
+    /// forge réémet dans les minutes ou les heures qui suivent, jamais dans les semaines : une
+    /// entrée d'il y a trente jours ne protège plus de rien. La seule conséquence d'une purge trop
+    /// agressive serait un run relancé pour une livraison ancienne rejouée à la main — d'où une
+    /// fenêtre large et non serrée.
+    ///
+    /// Une erreur ici n'interrompt pas la passe : le ménage est une commodité, pas une garantie.
+    /// </summary>
+    private async Task SweepTriggerDeliveriesAsync(CancellationToken ct)
+    {
+        if (_triggerDeliveryRetention <= TimeSpan.Zero) return;
+
+        try
+        {
+            using var db = _connectionFactory.CreateConnection();
+            var deleted = await db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM trigger_deliveries WHERE received_at < @Cutoff",
+                new { Cutoff = DateTime.UtcNow - _triggerDeliveryRetention },
+                cancellationToken: ct));
+
+            if (deleted > 0)
+                _logger.Information("Purged {Count} trigger deliveries older than {Retention}",
+                    deleted, _triggerDeliveryRetention);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning(ex, "Could not purge trigger deliveries");
+        }
     }
 
     private void SweepRunDirectories()

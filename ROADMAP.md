@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-525 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
+531 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
 (Chiffres mesurés en exécutant les trois suites après fusion, pas déduits.)
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
@@ -443,18 +443,42 @@ C'est la raison pour laquelle l'observabilité opérationnelle ci-dessous n'est 
 configuration : les règles d'alerte se poseront sur ces séries, et une série fausse produit une
 alerte fausse ou, pire, silencieuse.
 
-### 4.5 Reste à faire dans ce lot
+### 4.5 Observabilité opérationnelle ✅ livré
+
+`deploy/observability/alerts.yml` — neuf règles Prometheus, en trois familles : disponibilité,
+exécution des agents, dépendances. Distinctes du lot 3 : celui-ci répond à un utilisateur (« combien
+m'ont coûté mes agents »), celles-là à un exploitant (« le service tient-il debout »), et n'ont pas
+de notion d'organisation.
+
+**Un fichier de configuration mérite des tests**, parce qu'une règle qui interroge une série
+inexistante ne produit aucune erreur : elle produit zéro, indéfiniment, donc une alerte qui ne se
+déclenche jamais — le pire des deux mondes, l'exploitant se croyant couvert. `OperationalAlertsTests`
+confronte le fichier aux instruments **réellement publiés** (obtenus d'un `MeterListener`, pas d'une
+liste recopiée qui divergerait au premier ajout), et exige que chaque instrument soit soit alerté,
+soit explicitement exclu **avec sa raison**. Vérifié en renommant une série avec un « s » de trop :
+deux tests virent au rouge.
+
+Une règle inhabituelle mérite d'être signalée : `AgentHostQueueDepthNegative` surveille une
+impossibilité. Elle existe parce que c'est arrivé (§4.4), et parce qu'un tableau de bord affichant
+`-3` se lit comme « rien à signaler ».
+
+**Pas de tableau de bord Grafana livré**, et c'est délibéré : un JSON de dashboard n'est vérifiable
+par rien ici — il ne compile pas, aucun test ne l'exécute, et une capture d'écran ne prouve pas qu'il
+interroge les bonnes séries. `docs/observabilite-operationnelle.md` donne la table des séries à
+partir de laquelle en construire un juste.
+
+**Purge de `trigger_deliveries`** : intégrée à `RunDataJanitor` (`Retention:TriggerDeliveryDays`,
+30 jours par défaut, 0 = désactivé). C'est la seule table du schéma dont la croissance n'est bornée
+par rien — ni par un nombre de runs, ni par un nombre d'utilisateurs, seulement par le trafic
+entrant. Le test vérifie surtout qu'une entrée **récente survit** : c'est elle qui empêche une
+réémission de relancer l'agent.
+
+### 4.6 Reste à faire dans ce lot
 
 - **Pools de conteneurs pré-chauffés** et **réutilisation de workspaces** entre runs d'un même
   projet : les deux exigent un runtime de conteneurs, que cet environnement n'a pas (voir
   `docs/validation-reelle.md`, même famille que le point 1.3). Écrire ces chemins sans jamais les
   exécuter produirait du code qui compile et dont personne ne sait s'il fonctionne.
-- **Observabilité opérationnelle** (§14) : tableaux de bord et alertes côté exploitation, distincts
-  du lot 3 qui vise l'utilisateur final. Les instruments existent (`AgentHost.Business` sur
-  `/metrics`) ; ce qui manque est le jeu de règles d'alerte et les tableaux de bord qui les
-  consomment.
-- **Purge de `trigger_deliveries`** : l'index sur `received_at` la rend bon marché, mais rien ne
-  l'exécute — un `DELETE … WHERE received_at < NOW() - INTERVAL '30 days'` reste à planifier.
 
 ---
 

@@ -1,0 +1,151 @@
+# Agent Host — règles d'alerte d'exploitation (spécification §14, feuille de route lot 4)
+#
+# CE QUE CE FICHIER N'EST PAS. Ce n'est pas le pendant du tableau de bord du lot 3. Celui-là répond
+# aux questions d'un UTILISATEUR de la plateforme — « combien m'ont coûté mes agents, lesquels
+# échouent, vais-je dépasser mon budget » — et vit dans l'IHM, scopé à son organisation. Celui-ci
+# répond aux questions d'un EXPLOITANT — « le service tient-il debout, et si non, depuis quand » —
+# et n'a pas de notion d'organisation.
+#
+# POURQUOI AUCUNE ALERTE SUR LE COÛT. Le dépassement de budget est un événement métier, déjà
+# remonté dans l'IHM de l'utilisateur concerné, qui est le seul à pouvoir décider quoi en faire.
+# Réveiller un exploitant parce qu'un client dépense son propre argent serait une astreinte sur une
+# décision qui ne lui appartient pas. `agenthost_budget_exhausted_total` figure quand même ici, mais
+# comme signal d'INFORMATION agrégé : un pic global signale une erreur de configuration de la
+# plateforme, pas un client dépensier.
+#
+# LES SEUILS SONT DES POINTS DE DÉPART. Ils sont choisis pour une installation de taille modeste et
+# doivent être relus avec un mois de données réelles. Ce qui n'est PAS négociable, en revanche,
+# c'est la forme : chaque règle porte un `for` non nul, parce qu'une alerte qui se déclenche sur un
+# point isolé est une alerte qu'on apprend à ignorer.
+
+groups:
+  - name: agenthost.platform
+    interval: 30s
+    rules:
+      # ---- disponibilité ----
+
+      - alert: AgentHostBackendDown
+        expr: up{job="agenthost-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend Agent Host injoignable ({{ $labels.instance }})"
+          description: >-
+            Prometheus ne scrute plus cette instance depuis 2 minutes. Avec plusieurs répliques,
+            vérifier d'abord si les autres répondent : la perte d'une seule n'interrompt plus le
+            service depuis que l'affinité run → runner est persistée (migration 0009).
+
+      - alert: AgentHostHighErrorRate
+        expr: >-
+          sum(rate(http_server_request_duration_seconds_count{job="agenthost-backend",http_response_status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_server_request_duration_seconds_count{job="agenthost-backend"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Plus de 5 % de réponses 5xx sur l'API"
+          description: >-
+            Un taux, et non un compte : le nombre absolu d'erreurs suit le trafic, et alerter
+            dessus déclencherait aux heures de pointe d'une plateforme en bonne santé.
+
+      # ---- exécution des agents ----
+
+      - alert: AgentHostInfraErrorRate
+        expr: >-
+          sum(rate(agenthost_infra_error_total[15m]))
+          /
+          sum(rate(agenthost_run_finished_total[15m]))
+          > 0.10
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Plus de 10 % des runs échouent sur l'infrastructure"
+          description: >-
+            `infra_error` est distingué des échecs ordinaires précisément pour cette alerte : un
+            agent qui échoue fait son travail, une infrastructure qui échoue est notre problème.
+            Chercher du côté du démon de conteneurs, du stockage d'artefacts et de l'image registry.
+
+      - alert: AgentHostQueueBacklog
+        expr: sum(agenthost_run_in_flight) > 50
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} runs en vol depuis 15 minutes"
+          description: >-
+            La profondeur de file ne redescend pas : soit les runners sont saturés, soit des runs
+            restent bloqués dans un état non terminal. Croiser avec la durée p95 ci-dessous.
+            (Cette série a été fausse jusqu'au lot 4 — voir la note du fichier de documentation.)
+
+      - alert: AgentHostQueueDepthNegative
+        expr: sum(agenthost_run_in_flight) < 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "La profondeur de file est négative — l'instrumentation ment"
+          description: >-
+            Une jauge négative est impossible : c'est un incrément manquant ou un décrément en
+            trop, exactement le défaut corrigé au lot 4. Cette règle existe pour que la même
+            régression ne repasse plus jamais inaperçue — un tableau de bord affichant -3 se lit
+            comme « rien à signaler ».
+
+      - alert: AgentHostRunDurationP95
+        expr: >-
+          histogram_quantile(0.95, sum by (le) (rate(agenthost_run_duration_seconds_bucket[30m])))
+          > 900
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Durée p95 des runs au-delà de 15 minutes"
+          description: >-
+            p95 et non la moyenne : une moyenne basse masque une queue de distribution qui est
+            justement ce qui sature les runners.
+
+      - alert: AgentHostApprovalsStalling
+        expr: >-
+          histogram_quantile(0.9, sum by (le) (rate(agenthost_approval_wait_seconds_bucket[1h])))
+          > 86400
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Les approbations attendent plus de 24 h"
+          description: >-
+            Signal d'usage plus que de panne : des runs bloqués sur une porte d'approbation
+            consomment un emplacement d'exécution sans progresser. À croiser avec la profondeur de
+            file avant d'incriminer les runners.
+
+      - alert: AgentHostBudgetExhaustionSpike
+        expr: sum(rate(agenthost_budget_exhausted_total[1h])) * 3600 > 20
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Plus de 20 runs par heure interrompus faute de budget"
+          description: >-
+            Informatif, jamais une astreinte : un client qui dépense son propre argent ne regarde
+            pas l'exploitant. Un pic GLOBAL, en revanche, sent l'erreur de configuration — un
+            plafond par défaut trop bas après un déploiement, par exemple.
+
+      # ---- dépendances ----
+
+      - alert: AgentHostDatabaseSaturated
+        expr: >-
+          sum(db_client_connections_usage{state="used"})
+          /
+          sum(db_client_connections_max)
+          > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pool de connexions Postgres à plus de 85 %"
+          description: >-
+            Au-delà, les requêtes commencent à attendre une connexion, ce qui se manifeste d'abord
+            comme une lenteur générale et non comme une erreur.
