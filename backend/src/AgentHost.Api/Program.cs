@@ -137,6 +137,7 @@ builder.Services.AddScoped<IRunService, RunService>();
 builder.Services.AddScoped<IAgentService, AgentService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ITriggerService, TriggerService>();
+builder.Services.AddScoped<IOrgPurgeService, OrgPurgeService>();
 builder.Services.AddScoped<IMemoryService, MemoryService>();
 // ---- Orchestration : en processus (défaut) ou déléguée au tier runner ----
 //
@@ -486,6 +487,35 @@ if (args.Contains("--rekey-secrets"))
     // Code de sortie non nul si quoi que ce soit a échoué : un script d'exploitation doit pouvoir
     // s'arrêter là plutôt que d'enchaîner sur le retrait de l'ancienne clé.
     return report.Failed == 0 ? 0 : 1;
+}
+
+// `dotnet AgentHost.Api.dll --purge-org <orgId>` efface DÉFINITIVEMENT une organisation et tout ce
+// qui en dépend, puis sort sans jamais écouter sur le réseau (dette : « purge RGPD réelle »).
+//
+// Hors ligne pour les mêmes raisons que --rekey-secrets, plus une qui lui est propre : celui dont
+// on efface l'organisation ne peut pas, par construction, rester authentifié à la fin de
+// l'opération. Il n'y a donc pas d'appelant à autoriser, et une purge accessible par HTTP serait
+// une suppression de compte à un jeton de distance.
+if (args.Contains("--purge-org"))
+{
+    var index = Array.IndexOf(args, "--purge-org");
+    var orgId = index + 1 < args.Length ? args[index + 1] : null;
+
+    if (string.IsNullOrWhiteSpace(orgId) || orgId.StartsWith('-'))
+    {
+        Log.Error("Usage : --purge-org <orgId>");
+        await Log.CloseAndFlushAsync();
+        return 2;
+    }
+
+    using var purgeScope = app.Services.CreateScope();
+    var purge = purgeScope.ServiceProvider.GetRequiredService<IOrgPurgeService>();
+    var purgeReport = await purge.PurgeAsync(orgId);
+    await Log.CloseAndFlushAsync();
+
+    // Code distinct quand l'organisation n'existait pas : un script d'exploitation doit pouvoir
+    // distinguer « effacée » de « il n'y avait rien à effacer », qui n'appellent pas la même suite.
+    return purgeReport.Found ? 0 : 3;
 }
 
 // Must run before anything that reads the client IP or scheme (rate limiter partitions, logs).

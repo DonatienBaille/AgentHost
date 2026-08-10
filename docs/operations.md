@@ -154,3 +154,54 @@ et réactivez-le.
 - **Pas de test de restauration automatisé.** Une sauvegarde jamais restaurée n'est pas une
   sauvegarde : restaurez périodiquement dans une base jetable et vérifiez qu'un run consommant un
   secret fonctionne.
+
+---
+
+## Effacement définitif d'une organisation (RGPD)
+
+```bash
+dotnet AgentHost.Api.dll --purge-org 01HZX...
+```
+
+**Ce n'est pas la suppression ordinaire.** `DELETE /api/organizations/{id}` pose un `deleted_at` :
+une erreur de manipulation se rattrape, et les runs passés gardent un sens. Cette commande-ci
+efface — définitivement, sans corbeille, et sans qu'aucune sauvegarde antérieure ne soit affectée.
+Restaurer une sauvegarde prise avant la purge ramènerait les données ; c'est une conséquence du
+mécanisme de sauvegarde, pas un défaut de la purge, et elle doit être prise en compte dans la
+réponse à une demande d'effacement (voir §6).
+
+**Codes de sortie** — pensés pour un script :
+
+| Code | Signification |
+| ---- | ------------- |
+| `0`  | organisation effacée |
+| `2`  | usage incorrect (identifiant manquant) |
+| `3`  | l'organisation n'existait pas — rien à faire, ce n'est pas une erreur |
+
+**Hors ligne, et pas derrière une API.** Il n'y a pas d'appelant à autoriser : celui dont on efface
+l'organisation ne peut pas, par construction, rester authentifié à la fin de l'opération. Une purge
+accessible par HTTP serait une suppression de compte à un jeton de distance.
+
+**Tout ou rien.** Une seule transaction sur une vingtaine de tables. Une purge à moitié faite
+laisserait des lignes orphelines que plus aucun chemin applicatif ne sait atteindre — donc des
+données personnelles devenues invisibles, ce qui est pire que de ne rien avoir effacé.
+
+**La purge tourne contre l'application vivante.** Elle verrouille les lignes parentes (`FOR
+UPDATE`) avant d'effacer : un run en cours qui écrirait un événement pendant l'opération attend la
+fin de la transaction, puis échoue — ce qui est exact, le run ayant disparu. Il n'est donc pas
+nécessaire d'arrêter le service, mais il reste préférable de purger une organisation dont l'activité
+est terminée.
+
+**Le journal d'audit part avec le reste, et c'est la seule dérogation au WORM du dépôt.**
+`audit_log` est append-only (migration 0008) parce qu'un journal effaçable ne prouve rien. La
+responsabilité qu'il sert à établir s'exerce cependant *à l'intérieur d'une organisation vivante* :
+une fois celle-ci effacée, conserver l'activité de ses membres n'est plus une garantie pour qui que
+ce soit — c'est exactement la conservation que le droit interdit. Le trigger de suppression est donc
+désactivé le temps de la transaction, pour les seules lignes de cette organisation, et rétabli même
+en cas d'échec. L'opération est tracée dans le journal du service (pas dans `audit_log` : y écrire
+l'effacement reviendrait à conserver l'identifiant dans la table qu'on vient de purger).
+
+**Ce que la purge ne couvre pas.** Les fichiers hors base — workspaces et artefacts sur disque ou
+dans le stockage objet — relèvent de la rétention (`Retention:*`, voir plus haut) et ne sont pas
+supprimés par cette commande. Un effacement complet suppose donc de laisser la rétention faire son
+travail, ou de nettoyer le préfixe correspondant à la main.

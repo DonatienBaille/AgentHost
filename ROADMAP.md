@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-554 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
+560 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
 (Chiffres mesurés en exécutant les trois suites après fusion, pas déduits.)
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
@@ -563,6 +563,26 @@ Reste à traiter :
   désormais quelque part. La réinitialisation affiche **le même message que l'adresse existe ou
   non**, pour ne pas rouvrir côté IHM l'oracle d'énumération que le 202 plat du serveur referme.
 - Aucun test de charge : le comportement sous concurrence est inconnu.
-- Pas de suppression en cascade au-delà du soft-delete organisation/projet (purge RGPD réelle).
+- ✅ **Purge RGPD réelle** : `dotnet AgentHost.Api.dll --purge-org <orgId>` efface définitivement
+  une organisation et tout ce qui en dépend, en une seule transaction sur une vingtaine de tables.
+  La suppression ordinaire posait un `deleted_at` — le bon comportement pour une erreur de
+  manipulation, mais un droit à l'effacement auquel on répond par un drapeau est mimé, pas honoré.
+
+  Trois points valent d'être connus. **La purge tourne contre l'application vivante** : elle
+  verrouille les lignes parentes (`FOR UPDATE`) avant d'effacer, sinon un run en cours écrit un
+  événement pendant l'opération et la clé étrangère fait échouer la transaction — ce n'est pas un
+  cas de test, c'est le cas normal. **Le journal d'audit part avec le reste**, ce qui est la seule
+  dérogation au WORM du dépôt : la responsabilité qu'il établit s'exerce à l'intérieur d'une
+  organisation vivante, et conserver l'activité de ses membres après effacement est exactement la
+  conservation que le droit interdit. Le trigger est rétabli même en cas d'échec, et un test le
+  vérifie sur une autre organisation. **L'ordre d'effacement est écrit à la main**, pas dérivé des
+  clés étrangères : une purge qui découvrirait l'ordre toute seule effacerait aussi ce que personne
+  n'a relu.
+
+  6 tests d'intégration, dont un qui confronte la liste des tables purgées au **schéma réel** — une
+  table ajoutée sans être purgée y laisserait des données personnelles hors d'atteinte.
+
+  Ce qui reste hors de portée : les fichiers hors base (workspaces, artefacts) relèvent de la
+  rétention, et une sauvegarde antérieure ramènerait les données si on la restaurait.
 - Pas de réplication ni de restauration à un instant précis (PITR) — voir §6 de
   [docs/operations.md](docs/operations.md).
