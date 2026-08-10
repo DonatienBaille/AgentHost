@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-537 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
+554 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
 (Chiffres mesurés en exécutant les trois suites après fusion, pas déduits.)
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
@@ -518,10 +518,26 @@ Traité :
 
 Reste à traiter :
 
-- La file d'envoi de courriels est **en mémoire et non persistante** : un arrêt brutal du processus
-  perd les messages pas encore acheminés. Acceptable pour un courriel transactionnel qu'on peut
-  redemander, mais une table d'attente (« outbox ») serait le vrai correctif — le point d'extension
-  est `Services/Email/EmailDispatcher.cs`, sans changement pour les appelants.
+- ✅ **La file d'envoi de courriels est durable** (migration `0013`, table `email_outbox`). Un échec
+  de remise est désormais réessayé avec un recul exponentiel qui survit au redémarrage — c'est le
+  gain principal, l'ancienne file n'en offrait rien — et un message qu'on renonce à envoyer reste
+  visible en base avec sa dernière erreur, au lieu de disparaître dans une ligne de journal.
+
+  **La persistance a lieu côté consommateur, pas dans la requête**, et ce n'est pas un raccourci :
+  écrire en base depuis `POST /api/auth/password-reset/request` rouvrirait l'oracle d'énumération
+  par le temps ET par l'échec, que le 202 plat referme. La mise en file reste donc une écriture en
+  mémoire, et la fenêtre de perte résiduelle — quelques millisecondes entre la mise en file et
+  l'écriture — est assumée et énoncée telle quelle, au lieu de la couvrir d'une garantie qu'elle
+  n'a pas.
+
+  **Le corps est chiffré au repos.** Il contient le jeton en clair, et le dépôt ne stocke jamais un
+  jeton autrement que par empreinte : persister le corps tel quel aurait défait cette propriété par
+  la porte de service, une ligne en attente devenant un lien de réinitialisation utilisable par
+  quiconque lit la table. Même clé et même rotation que les secrets applicatifs. Une remise réussie
+  **supprime** la ligne — un message acheminé n'a plus de raison de garder un secret en base.
+
+  9 tests de comportement + 8 d'intégration SQL (dont la course entre deux répartiteurs, que seul
+  `FOR UPDATE SKIP LOCKED` tranche).
 - Le TLS implicite du port 465 n'est pas géré par `SmtpEmailSender` (limite de
   `System.Net.Mail.SmtpClient`) ; un déploiement qui n'a que du 465 doit passer par un relais local
   ou justifier l'ajout de MailKit.

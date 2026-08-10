@@ -99,7 +99,7 @@ public class EmailSenderTests
     public async Task Dispatcher_DeliversQueuedMessagesToTheSender()
     {
         var sender = new CapturingEmailSender();
-        var dispatcher = new BackgroundEmailDispatcher(sender, Logger);
+        var dispatcher = TestDispatcher.Create(sender, new InMemoryOutbox(), Logger);
         await dispatcher.StartAsync(CancellationToken.None);
 
         dispatcher.Enqueue(Message("first@example.com"));
@@ -116,7 +116,7 @@ public class EmailSenderTests
     {
         // Un seul destinataire refusé ne doit pas arrêter tous les envois suivants du processus.
         var sender = new CapturingEmailSender { ThrowOnSend = true };
-        var dispatcher = new BackgroundEmailDispatcher(sender, Logger);
+        var dispatcher = TestDispatcher.Create(sender, new InMemoryOutbox(), Logger);
         await dispatcher.StartAsync(CancellationToken.None);
 
         dispatcher.Enqueue(Message("boom@example.com"));
@@ -133,7 +133,7 @@ public class EmailSenderTests
     {
         // Le point important pour les appelants : mettre en file est une opération qui ne peut pas
         // échouer, quel que soit l'état de la file ou de l'expéditeur.
-        var dispatcher = new BackgroundEmailDispatcher(new CapturingEmailSender { ThrowOnSend = true }, Logger);
+        var dispatcher = TestDispatcher.Create(new CapturingEmailSender { ThrowOnSend = true }, new InMemoryOutbox(), Logger);
 
         for (var i = 0; i < BackgroundEmailDispatcher.Capacity + 50; i++)
             dispatcher.Enqueue(Message($"flood-{i}@example.com"));
@@ -142,9 +142,9 @@ public class EmailSenderTests
     [Fact]
     public void Dispatcher_ReportsWhetherTheUnderlyingSenderIsConfigured()
     {
-        var withMailer = new BackgroundEmailDispatcher(new CapturingEmailSender(), Logger);
-        var withoutMailer = new BackgroundEmailDispatcher(
-            new NoOpEmailSender(Logger, "aucun fournisseur configuré"), Logger);
+        var withMailer = TestDispatcher.Create(new CapturingEmailSender(), new InMemoryOutbox(), Logger);
+        var withoutMailer = TestDispatcher.Create(
+            new NoOpEmailSender(Logger, "aucun fournisseur configuré"), new InMemoryOutbox(), Logger);
 
         Assert.True(withMailer.IsConfigured);
         Assert.False(withoutMailer.IsConfigured);

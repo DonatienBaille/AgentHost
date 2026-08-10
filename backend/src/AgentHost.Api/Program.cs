@@ -206,6 +206,7 @@ builder.Services.AddSingleton<IBreachedPasswordChecker, BreachedPasswordChecker>
 var emailOptions = EmailOptions.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(emailOptions);
 builder.Services.AddSingleton(sp => EmailSenderFactory.Create(emailOptions, sp.GetRequiredService<ILogger>()));
+builder.Services.AddSingleton<IEmailOutboxRepository, EmailOutboxRepository>();
 builder.Services.AddSingleton<BackgroundEmailDispatcher>();
 builder.Services.AddSingleton<IEmailDispatcher>(sp => sp.GetRequiredService<BackgroundEmailDispatcher>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BackgroundEmailDispatcher>());
