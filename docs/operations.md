@@ -145,12 +145,134 @@ Ce que cela ne protège pas, et il faut le savoir :
 Pour une purge réglementaire, désactivez explicitement le trigger, tracez l'opération **hors base**,
 et réactivez-le.
 
-## 6. Ce qui n'est pas couvert
+## 6. Restauration à un instant précis (PITR)
 
-- **Pas de réplication ni de bascule.** La base est un point de défaillance unique ; ces scripts
-  couvrent la sauvegarde, pas la haute disponibilité.
-- **Pas de restauration à un instant précis (PITR).** Il faudrait l'archivage WAL, qui se configure
-  côté PostgreSQL. Un dump quotidien signifie jusqu'à 24 h de perte.
+Le dump logique de §2 ramène l'état du dump. C'est le bon outil pour « la machine a brûlé », et le
+mauvais pour « quelqu'un a lancé la mauvaise commande à 14 h 32 » : un dump quotidien signifie
+jusqu'à 24 h de perte, et ne sait pas viser un instant. La restauration à un instant précis répond à
+la seconde question — la perte se mesure en secondes, et l'on choisit le moment.
+
+**Les deux se gardent.** Le dump logique est le seul qui survive à un changement de version majeure
+de PostgreSQL, se restaure table par table, et se relit sans la grappe d'origine. La sauvegarde
+physique est liée à la version et à l'architecture qui l'a produite. L'une n'est pas une version
+améliorée de l'autre.
+
+### 6.1 Activer l'archivage WAL
+
+Sans archivage, il n'y a pas de PITR : le journal qui permettrait de rejouer est recyclé au fil de
+l'eau. C'est une configuration serveur, à poser **avant** la première sauvegarde de base.
+
+Avec Docker, l'overlay fourni suffit :
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.pitr.yml up -d
+```
+
+Sur une installation par paquet, dans `conf.d/pitr.conf` :
+
+```conf
+wal_level = replica
+archive_mode = on
+archive_command = 'test ! -f /var/backups/agenthost/wal/%f && cp %p /var/backups/agenthost/wal/%f'
+archive_timeout = 300
+```
+
+Trois détails valent d'être connus :
+
+- **`test ! -f` d'abord.** PostgreSQL peut rappeler la commande pour un segment déjà archivé.
+  L'écraser corromprait l'archive à l'endroit précis où l'on en aurait besoin ; la commande doit
+  refuser, pas réussir à moitié.
+- **`archive_timeout`.** Sans lui, une instance peu active garde son segment courant ouvert
+  indéfiniment : l'archive paraît à jour et la fenêtre de perte réelle est sans limite.
+- **L'archive va sur un autre stockage que la base.** Une archive rangée à côté des données
+  disparaît avec elles. Elle n'a de valeur que si elle survit à ce dont elle doit permettre la
+  reprise.
+
+`archive_mode` demande un redémarrage du serveur.
+
+### 6.2 Sauvegarde de base
+
+```bash
+scripts/basebackup.sh /var/backups/agenthost/base
+```
+
+À planifier plus rarement que le dump logique (hebdomadaire suffit souvent) : c'est le point de
+départ du rejeu, et les segments WAL couvrent l'intervalle. Plus la sauvegarde est ancienne, plus la
+restauration rejoue longtemps — c'est le seul arbitrage.
+
+Le script avertit si `archive_mode` est inactif : une sauvegarde de base sans archive est
+restaurable telle quelle, mais ne permet **pas** de PITR, et il vaut mieux l'apprendre le jour de la
+sauvegarde que le jour de l'incident.
+
+### 6.3 Restaurer
+
+```bash
+sudo -u postgres scripts/restore-pitr.sh \
+    /var/backups/agenthost/base/20260810T052032Z \
+    /var/backups/agenthost/wal \
+    '2026-08-10 14:32:00+00'
+```
+
+**La grappe d'origine n'est jamais touchée.** La restauration se fait dans un répertoire neuf et sur
+un port distinct (5433 par défaut) : on obtient une seconde instance, à côté, qu'on interroge avant
+de décider quoi que ce soit. Une procédure qui écrase la production pour être vérifiée n'est pas une
+procédure, c'est un second incident.
+
+Points d'attention :
+
+- **Précisez le fuseau dans l'horodatage.** Un horodatage nu est interprété dans le fuseau du
+  serveur, et se tromper d'une heure pendant une restauration d'urgence ne se remarque qu'après.
+- **La reprise s'arrête *avant* la première transaction qui dépasse la cible.** Le script affiche
+  l'instant réellement atteint ; il diffère toujours un peu de celui demandé.
+- **À exécuter sous le compte propriétaire de PostgreSQL.** Le serveur refuse de tourner en root, et
+  la commande de restauration doit pouvoir lire l'archive.
+- **Sur Debian et Ubuntu, la sauvegarde n'emporte pas la configuration** : la distribution range
+  `postgresql.conf` et `pg_hba.conf` hors du répertoire de données, que `pg_basebackup` est seul à
+  copier. Le script en génère donc une minimale, en lisant dans le fichier de contrôle de la
+  sauvegarde les quatre réglages de dimensionnement que la reprise exige d'égaler. Cette
+  configuration ouvre la sauvegarde ; elle ne remplace pas celle de production avant une bascule.
+
+**Vérifié de bout en bout** contre une vraie grappe PostgreSQL 16 : sauvegarde de base, écriture,
+suppression accidentelle d'une ligne, restauration à un instant antérieur. L'instance restaurée
+portait bien la ligne supprimée et ignorait l'écriture postérieure à la cible, pendant que la
+production restait inchangée.
+
+### 6.4 Nettoyage de l'archive
+
+Les segments antérieurs à la plus ancienne sauvegarde de base conservée ne servent plus à rien, et
+une archive qui grossit sans limite finit par remplir le disque — c'est-à-dire par arrêter la base
+qu'elle devait protéger. `pg_archivecleanup` fait ce ménage :
+
+Chaque sauvegarde de base dépose dans l'archive un marqueur `<segment>.<décalage>.backup`. Celui de
+la plus ancienne sauvegarde que l'on conserve donne la borne : tout ce qui le précède est
+inutilisable, puisque plus aucune sauvegarde ne permet de rejouer à partir de là.
+
+```bash
+# Purger d'abord les vieilles sauvegardes de base (basebackup.sh le fait), puis :
+OLDEST=$(ls -1 /var/backups/agenthost/wal/*.backup | sort | head -1)
+
+pg_archivecleanup -n /var/backups/agenthost/wal "$(basename "$OLDEST")"   # ce qui serait supprimé
+pg_archivecleanup    /var/backups/agenthost/wal "$(basename "$OLDEST")"   # suppression
+```
+
+**Toujours `-n` d'abord.** La commande supprime tout ce qui précède le marqueur, sans confirmation :
+un marqueur trop récent efface la seule fenêtre de rejeu qui restait.
+
+Surveillez l'espace disque de l'archive : une archive qui grossit sans limite finit par remplir le
+volume, c'est-à-dire par arrêter la base qu'elle devait protéger. Aucune métrique `agenthost.` ne
+couvre cela — c'est à la supervision système de le porter.
+
+---
+
+## 7. Ce qui n'est pas couvert
+
+- **Pas de réplication ni de bascule automatique.** La base reste un point de défaillance unique.
+  L'archivage mis en place ci-dessus est la moitié du chemin : une réplique en flux se monte à
+  partir des mêmes éléments — `pg_basebackup --write-recovery-conf` sur le secondaire, un
+  `primary_conninfo` vers le primaire, et le même `restore_command` en secours si le flux
+  décroche. Ce qui manque n'est pas la sauvegarde mais la **bascule** : détection de panne, adresse
+  virtuelle ou proxy, protection contre le double primaire. Cela relève d'un gestionnaire de grappe
+  (Patroni, repmgr) et du déploiement, pas de ce dépôt.
 - **Pas de test de restauration automatisé.** Une sauvegarde jamais restaurée n'est pas une
   sauvegarde : restaurez périodiquement dans une base jetable et vérifiez qu'un run consommant un
   secret fonctionne.
@@ -168,7 +290,7 @@ une erreur de manipulation se rattrape, et les runs passés gardent un sens. Cet
 efface — définitivement, sans corbeille, et sans qu'aucune sauvegarde antérieure ne soit affectée.
 Restaurer une sauvegarde prise avant la purge ramènerait les données ; c'est une conséquence du
 mécanisme de sauvegarde, pas un défaut de la purge, et elle doit être prise en compte dans la
-réponse à une demande d'effacement (voir §6).
+réponse à une demande d’effacement (voir §7).
 
 **Codes de sortie** — pensés pour un script :
 

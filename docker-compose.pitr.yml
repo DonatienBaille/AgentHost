@@ -1,0 +1,45 @@
+# Overlay : archivage WAL et restauration à un instant précis.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.pitr.yml up -d
+#
+# Pourquoi un overlay et non le compose principal. `docker-compose.yml` est la pile de
+# développement : y activer l'archivage ferait grossir un volume à chaque `up`, sur une machine où
+# personne ne restaurera jamais rien. L'archivage est en revanche indispensable en déploiement — un
+# dump quotidien signifie jusqu'à 24 h de perte, et surtout ne sait pas revenir à l'instant qui
+# précède la commande qui a tout cassé.
+#
+# Voir docs/operations.md §6 pour la procédure complète, et scripts/basebackup.sh /
+# scripts/restore-pitr.sh pour les deux moitiés de l'opération.
+
+services:
+  postgres:
+    command:
+      - postgres
+      # `replica` est déjà le défaut ; l'écrire ici rend la condition visible plutôt que supposée.
+      # Un `wal_level = minimal` glissé dans une configuration voisine casserait l'archivage sans
+      # rien casser d'autre, donc sans se voir.
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      # `test ! -f` d'abord : PostgreSQL peut rappeler la commande pour un segment déjà archivé, et
+      # l'écraser corromprait l'archive au moment précis où l'on en aurait besoin. La commande doit
+      # refuser d'écraser, et échouer plutôt que réussir à moitié.
+      - -c
+      - archive_command=test ! -f /var/lib/postgresql/wal-archive/%f && cp %p /var/lib/postgresql/wal-archive/%f
+      # Force un changement de segment toutes les cinq minutes. Sans cela, une instance peu active
+      # garde son segment courant ouvert indéfiniment : l'archive semble à jour, et la fenêtre de
+      # perte réelle est en fait sans limite.
+      - -c
+      - archive_timeout=300
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+      # Volume distinct de celui des données, et c'est le point : une archive WAL rangée sur le même
+      # volume que la base disparaît avec elle. Elle n'a de valeur que si elle survit à ce dont elle
+      # doit permettre la reprise — en déploiement réel, sur un autre stockage, idéalement une autre
+      # machine.
+      - postgres_wal:/var/lib/postgresql/wal-archive
+
+volumes:
+  postgres_wal:

@@ -634,5 +634,33 @@ Reste à traiter :
 
   Ce qui reste hors de portée : les fichiers hors base (workspaces, artefacts) relèvent de la
   rétention, et une sauvegarde antérieure ramènerait les données si on la restaurait.
-- Pas de réplication ni de restauration à un instant précis (PITR) — voir §6 de
+- ✅ **Restauration à un instant précis (PITR)** : archivage WAL, `scripts/basebackup.sh`,
+  `scripts/restore-pitr.sh`, overlay `docker-compose.pitr.yml`, et §6 de
+  [docs/operations.md](docs/operations.md). Le dump quotidien répondait à « la machine a brûlé » et
+  pas à « quelqu'un a lancé la mauvaise commande à 14 h 32 » : il ramène l'état du dump, donc
+  jusqu'à 24 h de perte, et ne sait pas viser un instant.
+
+  **Vérifié de bout en bout contre une vraie grappe PostgreSQL 16**, et pas seulement écrit :
+  sauvegarde de base, écriture, suppression accidentelle d'une ligne, restauration à un instant
+  antérieur. L'instance restaurée portait la ligne supprimée et ignorait l'écriture postérieure à la
+  cible, pendant que la production restait inchangée. Trois défauts sont tombés en cours de route,
+  tous invisibles à la lecture : `pg_ctl` n'est pas dans le PATH sur Debian et Ubuntu (la
+  distribution n'expose que ses enveloppes, qui refusent un répertoire de données arbitraire) ; la
+  sauvegarde physique **n'emporte pas la configuration** sur ces mêmes distributions, qui la rangent
+  hors du répertoire de données, si bien que l'instance restaurée refusait de démarrer ; et
+  `pg_ctl start --wait` rend la main dès que le serveur accepte des connexions — **en lecture
+  seule, pendant la reprise** — de sorte qu'un script qui conclut là tient pour restaurée une
+  instance encore en train de rejouer.
+
+  Le script génère donc une configuration minimale en lisant les quatre réglages de dimensionnement
+  dans le fichier de contrôle de la sauvegarde elle-même — la seule source qui décrive la grappe
+  d'origine — et attend la fin de la reprise en interrogeant le serveur.
+
+  La restauration se fait dans un répertoire neuf et sur un port distinct : la grappe d'origine
+  n'est jamais touchée. Une procédure qui écrase la production pour être vérifiée n'est pas une
+  procédure, c'est un second incident.
+- **Pas de réplication ni de bascule automatique.** L'archivage ci-dessus est la moitié du chemin :
+  une réplique en flux se monte à partir des mêmes éléments. Ce qui manque n'est pas la sauvegarde
+  mais la bascule — détection de panne, adresse virtuelle, protection contre le double primaire —
+  qui relève d'un gestionnaire de grappe (Patroni, repmgr) et du déploiement. Voir §7 de
   [docs/operations.md](docs/operations.md).
