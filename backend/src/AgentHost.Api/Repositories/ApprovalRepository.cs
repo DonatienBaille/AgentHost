@@ -22,6 +22,33 @@ public interface IApprovalRepository
     Task InsertAsync(Approval approval, CancellationToken ct = default);
     Task UpdateAsync(Approval approval, CancellationToken ct = default);
 
+    /// <summary>
+    /// Ajoute une réponse à une approbation encore en attente, et rend la liste <b>complète</b>
+    /// après ajout — ou <c>null</c> si l'approbation n'était plus en attente.
+    ///
+    /// <b>Pourquoi ce n'est pas un <c>UpdateAsync</c>.</b> Le service lisait l'approbation,
+    /// ajoutait une réponse à la liste en mémoire, puis réécrivait la liste entière. Deux
+    /// approbateurs simultanés lisaient donc tous deux une liste vide et écrivaient chacun une
+    /// liste d'un élément : le second effaçait le premier. Un garde exigeant deux approbations ne
+    /// pouvait jamais être satisfait par deux personnes cliquant en même temps — ce qui est
+    /// précisément la situation pour laquelle il existe.
+    ///
+    /// La concaténation <c>jsonb</c> se fait en base, sur la valeur réellement stockée : rien
+    /// n'est lu côté application, donc rien ne peut y devenir périmé.
+    /// </summary>
+    Task<List<ApprovalResponse>?> AppendResponseAsync(
+        string approvalId, ApprovalResponse response, CancellationToken ct = default);
+
+    /// <summary>
+    /// Fait passer une approbation de « en attente » à un état décidé, et rend vrai <b>seulement à
+    /// l'appelant qui l'a effectivement fait basculer</b>.
+    ///
+    /// C'est la porte : le run n'est repris que par celui qui gagne ici. Sans elle, quatre
+    /// approbations concurrentes reprenaient quatre fois le même run.
+    /// </summary>
+    Task<bool> TryDecideAsync(
+        string approvalId, ApprovalStatus status, string? decidedBy, CancellationToken ct = default);
+
     /// <summary>Pending approvals whose <c>expires_at</c> has passed — the watchdog's expiry candidates.</summary>
     Task<List<Approval>> ListExpiredPendingAsync(DateTime nowUtc, CancellationToken ct = default);
 }
@@ -126,6 +153,62 @@ public class ApprovalRepository : IApprovalRepository
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, ApprovalRow.FromDomain(approval), cancellationToken: ct));
         _logger.Information("Updated approval {ApprovalId} to status {Status}", approval.Id, approval.Status);
+    }
+
+    public async Task<List<ApprovalResponse>?> AppendResponseAsync(
+        string approvalId, ApprovalResponse response, CancellationToken ct = default)
+    {
+        // `||` sur jsonb concatène deux tableaux. La réponse ajoutée est encapsulée dans un tableau
+        // d'un élément, sinon Postgres fusionnerait ses champs au niveau supérieur.
+        const string sql = """
+            UPDATE approvals
+            SET responses = COALESCE(responses, '[]'::jsonb) || jsonb_build_array(@Response::jsonb)
+            WHERE id = @Id AND status = @Pending
+            RETURNING responses
+            """;
+
+        using var db = _connectionFactory.CreateConnection();
+        var json = await db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            sql,
+            new
+            {
+                Id = approvalId,
+                Response = System.Text.Json.JsonSerializer.Serialize(response, JsonColumn.Options),
+                Pending = ApprovalStatus.Pending.ToDbString(),
+            },
+            cancellationToken: ct));
+
+        if (json is null) return null;
+
+        return System.Text.Json.JsonSerializer.Deserialize<List<ApprovalResponse>>(json, JsonColumn.Options)
+               ?? [];
+    }
+
+    public async Task<bool> TryDecideAsync(
+        string approvalId, ApprovalStatus status, string? decidedBy, CancellationToken ct = default)
+    {
+        const string sql = """
+            UPDATE approvals
+            SET status = @Status, decided_at = NOW(), decided_by = @DecidedBy
+            WHERE id = @Id AND status = @Pending
+            """;
+
+        using var db = _connectionFactory.CreateConnection();
+        var affected = await db.ExecuteAsync(new CommandDefinition(
+            sql,
+            new
+            {
+                Id = approvalId,
+                Status = status.ToDbString(),
+                DecidedBy = decidedBy,
+                Pending = ApprovalStatus.Pending.ToDbString(),
+            },
+            cancellationToken: ct));
+
+        if (affected > 0)
+            _logger.Information("Approval {ApprovalId} decided: {Status}", approvalId, status);
+
+        return affected > 0;
     }
 
     /// <summary>Pending approvals past their expiry — deadline and status both filtered in SQL.</summary>

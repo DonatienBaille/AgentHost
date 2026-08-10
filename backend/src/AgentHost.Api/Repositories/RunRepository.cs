@@ -22,6 +22,20 @@ public interface IRunRepository
     Task<List<Run>> ListByOrgAsync(string orgId, int skip = 0, int take = 50, CancellationToken ct = default);
     Task InsertAsync(Run run, CancellationToken ct = default);
     Task UpdateAsync(Run run, CancellationToken ct = default);
+
+    /// <summary>
+    /// Écrit la ligne comme <see cref="UpdateAsync"/>, mais <b>seulement</b> si le statut en base
+    /// est encore <paramref name="expectedStatus"/>. Rend faux quand un autre appelant a déjà fait
+    /// changer l'état.
+    ///
+    /// C'est le garde-fou de la machine à états. Celle-ci vérifiait la validité d'une transition
+    /// sur l'objet qu'elle avait en mémoire, puis écrivait sans condition : quatre approbations
+    /// simultanées du même run lisaient toutes <c>awaiting_approval</c>, passaient toutes le
+    /// contrôle, et reprenaient toutes le run — quatre lancements, quatre facturations. Le seul
+    /// endroit où cette exclusion peut être décidée est la base, dans l'instruction d'écriture
+    /// elle-même.
+    /// </summary>
+    Task<bool> TryUpdateWithExpectedStatusAsync(Run run, RunStatus expectedStatus, CancellationToken ct = default);
     Task<long> GetNextRunNumberAsync(string projectId, CancellationToken ct = default);
 
     /// <summary>
@@ -149,42 +163,41 @@ public class RunRepository : IRunRepository
     }
 
     /// <summary>
-    /// Returns the next sequential `number` for a project. Uses a Postgres advisory lock keyed on
-    /// the project id so concurrent run creations for the same project serialize on this step
-    /// without needing a full table lock; unrelated projects are never blocked. The lock is
-    /// session-scoped and released automatically when the connection returned to the pool closes
-    /// (we open/close a dedicated connection per call here to bound the lock's lifetime tightly).
+    /// Le prochain <c>number</c> d'un projet, alloué par le compteur porté par la ligne du projet
+    /// (migration 0014).
+    ///
+    /// <b>Ce que remplace cette implémentation, et pourquoi.</b> La version précédente prenait un
+    /// verrou consultatif autour d'un <c>SELECT MAX(number) + 1</c> puis le relâchait avant de
+    /// rendre la valeur — donc AVANT que l'appelant n'insère. Le verrou protégeait la lecture, qui
+    /// n'en avait pas besoin, et laissait sans protection l'intervalle entre la lecture et
+    /// l'écriture, qui est le seul endroit où la course se produit. Douze créations simultanées
+    /// sur un même projet en refusaient cinq, avec une violation de <c>UNIQUE (project_id,
+    /// number)</c> remontée à l'appelant en erreur 500.
+    ///
+    /// L'<c>UPDATE ... RETURNING</c> ci-dessous n'a pas d'intervalle : le verrou de ligne que
+    /// Postgres pose de lui-même sérialise les concurrents, et la valeur rendue est celle qui vient
+    /// d'être écrite. Aucun autre projet n'est ralenti — le verrou porte sur une ligne.
+    ///
+    /// Un numéro alloué puis perdu (insertion refusée ensuite) laisse un trou. C'est le
+    /// comportement de toute séquence, et il est préférable au précédent : un trou se remarque, un
+    /// doublon corrompt.
     /// </summary>
     public async Task<long> GetNextRunNumberAsync(string projectId, CancellationToken ct = default)
     {
+        const string sql = """
+            UPDATE projects SET run_counter = run_counter + 1
+            WHERE id = @ProjectId
+            RETURNING run_counter
+            """;
+
         using var db = _connectionFactory.CreateConnection();
-        var lockKey = HashProjectId(projectId);
+        var next = await db.ExecuteScalarAsync<long?>(new CommandDefinition(
+            sql, new { ProjectId = projectId }, cancellationToken: ct));
 
-        await db.ExecuteAsync(new CommandDefinition("SELECT pg_advisory_lock(@Key)", new { Key = lockKey }, cancellationToken: ct));
-        try
-        {
-            var next = await db.ExecuteScalarAsync<long>(new CommandDefinition(
-                "SELECT COALESCE(MAX(number), 0) + 1 FROM runs WHERE project_id = @ProjectId",
-                new { ProjectId = projectId },
-                cancellationToken: ct));
-            return next;
-        }
-        finally
-        {
-            await db.ExecuteAsync(new CommandDefinition("SELECT pg_advisory_unlock(@Key)", new { Key = lockKey }, cancellationToken: ct));
-        }
-    }
-
-    private static long HashProjectId(string projectId)
-    {
-        // Deterministic 63-bit key for pg_advisory_lock(bigint) derived from the project ULID.
-        unchecked
-        {
-            long hash = 17;
-            foreach (var c in projectId)
-                hash = hash * 31 + c;
-            return hash & long.MaxValue;
-        }
+        // Aucune ligne mise à jour : le projet n'existe pas. Rendre 0 silencieusement produirait un
+        // run rattaché à rien, que la clé étrangère refuserait ensuite avec un message obscur.
+        return next ?? throw new InvalidOperationException(
+            $"Impossible d'allouer un numéro de run : le projet {projectId} n'existe pas.");
     }
 
     public async Task InsertAsync(Run run, CancellationToken ct = default)
@@ -266,6 +279,46 @@ public class RunRepository : IRunRepository
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, RunRow.FromDomain(run), cancellationToken: ct));
         _logger.Information("Updated run {RunId} status to {Status}", run.Id, run.Status);
+    }
+
+    public async Task<bool> TryUpdateWithExpectedStatusAsync(
+        Run run, RunStatus expectedStatus, CancellationToken ct = default)
+    {
+        // Identique à UpdateAsync, à la condition près : c'est elle qui fait tout le travail.
+        const string sql = """
+            UPDATE runs
+            SET status = @Status,
+                inputs = @Inputs::jsonb,
+                context = @Context::jsonb,
+                outputs = @Outputs::jsonb,
+                workspace_path = @WorkspacePath,
+                duration_ms = @DurationMs,
+                exit_code = @ExitCode,
+                error_message = @ErrorMessage,
+                error_code = @ErrorCode,
+                budget_max_usd = @BudgetMaxUsd,
+                budget_used_usd = @BudgetUsedUsd,
+                started_at = @StartedAt,
+                finished_at = @FinishedAt,
+                updated_at = @UpdatedAt
+            WHERE id = @Id AND status = @ExpectedStatus
+            """;
+
+        var parameters = new DynamicParameters(RunRow.FromDomain(run));
+        parameters.Add("ExpectedStatus", expectedStatus.ToDbString());
+
+        using var db = _connectionFactory.CreateConnection();
+        var affected = await db.ExecuteAsync(new CommandDefinition(sql, parameters, cancellationToken: ct));
+
+        if (affected == 0)
+        {
+            _logger.Debug("Run {RunId}: transition {From} -> {To} refusée, l'état en base a changé",
+                run.Id, expectedStatus, run.Status);
+            return false;
+        }
+
+        _logger.Information("Updated run {RunId} status to {Status}", run.Id, run.Status);
+        return true;
     }
 
     public async Task<decimal?> AddBudgetUsageAsync(string runId, decimal deltaUsd, CancellationToken ct = default)

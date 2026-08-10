@@ -375,30 +375,38 @@ public class RunService : IRunService
         var decision = (req.Decision ?? "approve").ToLowerInvariant();
         var decidedBy = CallerUserId;
 
+        // Deux portes, franchies dans cet ordre, et chacune tranchée par la base :
+        //
+        //   1. l'ajout de la réponse, qui échoue si l'approbation n'est plus en attente ;
+        //   2. la décision, qui ne rend vrai qu'à celui qui fait effectivement basculer le statut.
+        //
+        // Ce que la version précédente faisait — lire, modifier en mémoire, réécrire — perdait les
+        // réponses concurrentes ET laissait quatre approbateurs simultanés reprendre quatre fois le
+        // même run. Il n'y a aucun endroit hors de la base où l'exclusion puisse être décidée.
         if (approval is not null)
         {
-            approval.Responses.Add(new ApprovalResponse
+            var responses = await _approvalRepository.AppendResponseAsync(approval.Id, new ApprovalResponse
             {
                 By = decidedBy ?? "unknown",
                 Decision = decision,
                 At = DateTime.UtcNow,
                 Note = req.Note,
-            });
+            }, ct);
 
-            if (decision == "reject")
-            {
-                approval.Status = ApprovalStatus.Rejected;
-                approval.DecidedAt = DateTime.UtcNow;
-                approval.DecidedBy = decidedBy;
-            }
-            else if (approval.Responses.Count >= approval.RequiredCount)
-            {
-                approval.Status = ApprovalStatus.Approved;
-                approval.DecidedAt = DateTime.UtcNow;
-                approval.DecidedBy = decidedBy;
-            }
+            // Quelqu'un d'autre a déjà décidé entre notre lecture et notre écriture.
+            if (responses is null) return false;
 
-            await _approvalRepository.UpdateAsync(approval, ct);
+            var reached = decision == "reject" || responses.Count >= approval.RequiredCount;
+
+            // La réponse est enregistrée, mais le compte n'y est pas encore : c'est un succès pour
+            // l'appelant — il a voté — et le run ne bouge pas.
+            if (!reached) return true;
+
+            var decided = decision == "reject" ? ApprovalStatus.Rejected : ApprovalStatus.Approved;
+            if (!await _approvalRepository.TryDecideAsync(approval.Id, decided, decidedBy, ct))
+                return false;
+
+            approval.Status = decided;
         }
 
         if (decision == "reject")
@@ -417,7 +425,12 @@ public class RunService : IRunService
 
         if (approval is null || approval.Status == ApprovalStatus.Approved)
         {
-            await _stateMachine.TransitionAsync(run, RunStatus.Running, "approved", ct);
+            // Sans approbation enregistrée, il n'y a pas eu de porte en amont : c'est l'écriture
+            // conditionnelle de la machine à états qui joue ce rôle, et le perdant repart en faux
+            // plutôt qu'en erreur 500.
+            if (!await _stateMachine.TryTransitionAsync(run, RunStatus.Running, "approved", ct))
+                return false;
+
             await _eventBus.PublishAsync(new RunEvent
             {
                 RunId = runId,

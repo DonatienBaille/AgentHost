@@ -11,9 +11,20 @@ namespace AgentHost.Api.Infrastructure;
 /// for casting the parameter with `::jsonb` (Npgsql maps jsonb columns to `string` by default,
 /// which is what this handler's Parse() receives on read).
 /// </summary>
+/// <summary>
+/// Les options de sérialisation des colonnes <c>jsonb</c>, exposées parce que quelques dépôts
+/// écrivent du JSON directement en SQL — une concaténation <c>jsonb</c> côté base, par exemple, que
+/// Dapper ne peut pas produire. Ces écritures doivent employer exactement les mêmes options, sans
+/// quoi la même colonne porterait deux conventions de nommage selon le chemin qui l'a remplie.
+/// </summary>
+public static class JsonColumn
+{
+    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+}
+
 public class JsonTypeHandler<T> : SqlMapper.TypeHandler<T>
 {
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Options = JsonColumn.Options;
 
     public override T? Parse(object value)
     {

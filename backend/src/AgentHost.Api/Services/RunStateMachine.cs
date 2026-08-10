@@ -67,7 +67,21 @@ public class RunStateMachine
         run.Status = newStatus;
         run.UpdatedAt = DateTime.UtcNow;
 
-        await _runRepository.UpdateAsync(run, ct);
+        // Écriture conditionnelle, et non `UpdateAsync` : les deux contrôles ci-dessus portent sur
+        // l'objet en mémoire, qui a été lu il y a un instant. Entre cette lecture et cette écriture,
+        // un autre appelant a pu faire franchir la même porte au même run — c'est exactement ce que
+        // faisaient quatre approbations simultanées, qui produisaient quatre reprises du même run.
+        // La condition `status = @Expected` est le seul point où cette exclusion peut être tranchée.
+        //
+        // Le perdant lève : `TryTransitionAsync` le rattrape et rend faux, ce que les appelants
+        // légitimement concurrents (approbation, moniteur de conteneur) savent déjà traiter.
+        if (!await _runRepository.TryUpdateWithExpectedStatusAsync(run, previousStatus, ct))
+        {
+            run.Status = previousStatus;
+            throw new InvalidOperationException(
+                $"Transition {previousStatus} -> {newStatus} refusée pour le run {run.Id} : " +
+                "son état a changé entre-temps.");
+        }
 
         await _eventBus.PublishAsync(new RunEvent
         {

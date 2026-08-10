@@ -562,7 +562,57 @@ Reste à traiter :
 - ✅ Les écrans `/reset-password` et `/accept-invitation` existent : les liens des courriels mènent
   désormais quelque part. La réinitialisation affiche **le même message que l'adresse existe ou
   non**, pour ne pas rouvrir côté IHM l'oracle d'énumération que le 202 plat du serveur referme.
-- Aucun test de charge : le comportement sous concurrence est inconnu.
+- ✅ **Le comportement sous concurrence est mesuré, et il a livré quatre défauts.** Pas un banc de
+  performance : « combien de requêtes par seconde » dépend de la machine et n'a jamais rien empêché.
+  La question qui manquait est autre — **les invariants tiennent-ils quand deux appelants arrivent
+  ensemble ?** 9 tests d'intégration lancent leurs appels sur la vraie pile HTTP et la vraie base,
+  libérés d'un seul coup par un point de rendez-vous. Les quatre défauts trouvés étaient tous
+  invisibles sur une requête isolée :
+
+  **La numérotation des runs n'était pas protégée.** Un verrou consultatif entourait le
+  `SELECT MAX(number) + 1` puis était relâché *avant* l'insertion : il protégeait la lecture, qui
+  n'en avait pas besoin, et laissait nu l'intervalle lecture→écriture, le seul où la course a lieu.
+  Douze créations simultanées en refusaient cinq, avec une violation de contrainte remontée en
+  erreur 500. Remplacé par un compteur porté par la ligne du projet (migration `0014`),
+  `UPDATE … RETURNING`, qui n'a pas d'intervalle.
+
+  **La machine à états écrivait sans condition.** Elle validait la transition sur l'objet lu un
+  instant plus tôt, puis écrivait. Une annulation humaine et une expiration du chien de garde
+  arrivant ensemble passaient toutes deux : deux salves de webhooks `run.finished` pour un run, deux
+  entrées d'historique, et deux décréments de `agenthost.run.in_flight` pour un seul incrément —
+  la jauge négative, atteignable par un second chemin. L'écriture porte désormais l'état attendu en
+  condition.
+
+  **Les réponses d'approbation se perdaient.** Lire la liste, y ajouter la sienne, réécrire la
+  liste : trois approbateurs simultanés écrivaient trois listes d'un élément, dont il ne restait que
+  la dernière. Un garde exigeant trois approbations ne pouvait donc **jamais** être satisfait par
+  trois personnes cliquant ensemble — précisément la situation pour laquelle il existe. L'ajout se
+  fait maintenant par concaténation `jsonb` en base, et la décision est une porte que seul un
+  appelant franchit.
+
+  **La rotation des jetons ne tournait pas.** `RefreshAsync` émettait la nouvelle paire *puis*
+  révoquait l'ancienne : deux onglets rafraîchissant au même instant obtenaient chacun une paire
+  valide — deux familles vivantes issues d'une seule, et la détection de vol de jeton, qui repose
+  entièrement sur le rejeu d'un jeton révoqué, rendue inopérante. La révocation est passée avant
+  l'émission, et son `UPDATE … WHERE revoked_at IS NULL` n'a qu'un gagnant.
+
+  Un cinquième, plus discret, est corrigé au passage : deux inscriptions simultanées avec la même
+  adresse rendaient une erreur 500 (la contrainte d'unicité remontait brute) **et** laissaient une
+  organisation vide par tentative refusée — l'organisation étant créée avant l'utilisateur, sans
+  transaction commune. Le refus est désormais un 409, comme dans le cas séquentiel, et
+  l'organisation orpheline est défaite.
+
+  Ce que ces tests **ne** prouvent pas : rien sur la tenue en charge réelle — nombre de connexions,
+  saturation du pool, dégradation à chaud. Le limiteur de débit est neutralisé dans la fabrique de
+  test, si bien que le test de rafale vérifie qu'une salve ne met pas en file, pas que le seuil est
+  le bon.
+
+  Un point de comportement énoncé plutôt que corrigé : **le plafond mensuel d'un projet reste un
+  lire-puis-décider**, donc une rafale de créations peut le franchir d'un run. Sérialiser toutes les
+  créations d'un projet derrière un verrou coûterait, sur un projet actif, plus que le dépassement
+  — borné par le budget d'un seul run, chaque run ayant ensuite son propre plafond contrôlé. La
+  garantie exacte est donc : le plafond arrête un projet, mais la dernière rafale peut le franchir
+  d'un run.
 - ✅ **Purge RGPD réelle** : `dotnet AgentHost.Api.dll --purge-org <orgId>` efface définitivement
   une organisation et tout ce qui en dépend, en une seule transaction sur une vingtaine de tables.
   La suppression ordinaire posait un `deleted_at` — le bon comportement pour une erreur de

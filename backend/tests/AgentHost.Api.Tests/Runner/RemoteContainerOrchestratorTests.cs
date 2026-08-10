@@ -39,6 +39,10 @@ public class RemoteContainerOrchestratorTests
 
         public RemoteContainerOrchestrator Build(RunnerOptions options)
         {
+            Runs.Setup(r => r.TryUpdateWithExpectedStatusAsync(
+                    It.IsAny<Run>(), It.IsAny<RunStatus>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+
             Runs.Setup(r => r.SetRunnerUrlAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .Callback<string, string?, CancellationToken>((runId, url, _) =>
                 {

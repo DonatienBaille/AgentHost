@@ -19,6 +19,20 @@ public interface IOrganizationRepository
     /// — an orphaned-tenant data leak and a GDPR erasure gap.
     /// </summary>
     Task SoftDeleteCascadeAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Efface définitivement une organisation <b>à condition qu'aucun utilisateur ne s'y rattache</b>.
+    ///
+    /// Il n'y a qu'un appelant, et il est décrit dans <c>AuthService.RegisterAsync</c> : une
+    /// inscription insère l'organisation puis l'utilisateur, et rien ne peut réunir ces deux
+    /// écritures dans une transaction sans faire passer une transaction à travers des dépôts qui
+    /// n'en prennent pas. Quand la seconde échoue, la première doit être défaite — sinon chaque
+    /// inscription en collision laisse une organisation vide et invisible.
+    ///
+    /// La condition n'est pas décorative : elle garantit que ce chemin ne peut pas effacer une
+    /// organisation habitée, quelle que soit l'erreur qui l'a appelé.
+    /// </summary>
+    Task<bool> DeleteIfUninhabitedAsync(string id, CancellationToken ct = default);
 }
 
 public class OrganizationRepository : IOrganizationRepository
@@ -69,6 +83,17 @@ public class OrganizationRepository : IOrganizationRepository
         using var db = _connectionFactory.CreateConnection();
         await db.ExecuteAsync(new CommandDefinition(sql, org, cancellationToken: ct));
         _logger.Information("Updated organization {OrgId}", org.Id);
+    }
+
+    public async Task<bool> DeleteIfUninhabitedAsync(string id, CancellationToken ct = default)
+    {
+        const string sql = """
+            DELETE FROM organizations
+            WHERE id = @Id AND NOT EXISTS (SELECT 1 FROM users WHERE org_id = @Id)
+            """;
+        using var db = _connectionFactory.CreateConnection();
+        var affected = await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
+        return affected > 0;
     }
 
     public async Task SoftDeleteCascadeAsync(string id, CancellationToken ct = default)

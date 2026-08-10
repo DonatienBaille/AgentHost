@@ -136,6 +136,9 @@ public class RunInFlightGaugeTests
     {
         var runRepo = new Mock<IRunRepository>();
         runRepo.Setup(r => r.UpdateAsync(It.IsAny<Run>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        runRepo.Setup(r => r.TryUpdateWithExpectedStatusAsync(
+                It.IsAny<Run>(), It.IsAny<RunStatus>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var eventBus = new Mock<IEventBus>();
         eventBus.Setup(e => e.PublishAsync(It.IsAny<RunEvent>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);

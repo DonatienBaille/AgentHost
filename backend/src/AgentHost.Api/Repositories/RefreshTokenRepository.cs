@@ -13,7 +13,22 @@ public interface IRefreshTokenRepository
     Task<RefreshToken?> GetByHashAsync(string tokenHash, CancellationToken ct = default);
 
     /// <summary>Marks a single token revoked, optionally recording the token that replaced it.</summary>
-    Task RevokeAsync(string id, string? replacedById, CancellationToken ct = default);
+    /// <summary>
+    /// Révoque un jeton, et rend vrai <b>seulement à l'appelant qui l'a effectivement révoqué</b>.
+    ///
+    /// Ce booléen est la rotation elle-même, pas une commodité : deux onglets qui rafraîchissent au
+    /// même instant avec le même jeton lisent tous deux un jeton actif. Sans lui, les deux
+    /// obtenaient une nouvelle paire — soit deux familles vivantes issues d'un seul jeton, une
+    /// révocation qui ne révoque rien, et le vol de jeton devenu indétectable.
+    /// </summary>
+    Task<bool> RevokeAsync(string id, string? replacedById, CancellationToken ct = default);
+
+    /// <summary>
+    /// Renseigne <c>replaced_by_id</c> après coup, la révocation ayant eu lieu avant que le jeton
+    /// successeur n'existe. Le chaînage sert la traçabilité ; l'exclusion, elle, ne peut pas
+    /// attendre l'émission du successeur.
+    /// </summary>
+    Task<bool> SetReplacedByAsync(string id, string replacedById, CancellationToken ct = default);
 
     /// <summary>Revokes every still-active token for a user — the server side of "log out".</summary>
     Task<int> RevokeAllForUserAsync(string userId, CancellationToken ct = default);
@@ -52,7 +67,7 @@ public class RefreshTokenRepository : IRefreshTokenRepository
             new CommandDefinition(sql, new { TokenHash = tokenHash }, cancellationToken: ct));
     }
 
-    public async Task RevokeAsync(string id, string? replacedById, CancellationToken ct = default)
+    public async Task<bool> RevokeAsync(string id, string? replacedById, CancellationToken ct = default)
     {
         const string sql = """
             UPDATE refresh_tokens
@@ -60,7 +75,18 @@ public class RefreshTokenRepository : IRefreshTokenRepository
             WHERE id = @Id AND revoked_at IS NULL
             """;
         using var db = _connectionFactory.CreateConnection();
-        await db.ExecuteAsync(new CommandDefinition(sql, new { Id = id, ReplacedById = replacedById }, cancellationToken: ct));
+        var affected = await db.ExecuteAsync(new CommandDefinition(
+            sql, new { Id = id, ReplacedById = replacedById }, cancellationToken: ct));
+        return affected > 0;
+    }
+
+    public async Task<bool> SetReplacedByAsync(string id, string replacedById, CancellationToken ct = default)
+    {
+        const string sql = "UPDATE refresh_tokens SET replaced_by_id = @ReplacedById WHERE id = @Id";
+        using var db = _connectionFactory.CreateConnection();
+        var affected = await db.ExecuteAsync(new CommandDefinition(
+            sql, new { Id = id, ReplacedById = replacedById }, cancellationToken: ct));
+        return affected > 0;
     }
 
     public async Task<int> RevokeAllForUserAsync(string userId, CancellationToken ct = default)

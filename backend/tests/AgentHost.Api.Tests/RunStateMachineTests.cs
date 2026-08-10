@@ -17,6 +17,13 @@ public class RunStateMachineTests
         runRepo = new Mock<IRunRepository>();
         runRepo.Setup(r => r.UpdateAsync(It.IsAny<Run>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
+        // L'écriture conditionnelle réussit : ces tests portent sur la table de transitions, pas
+        // sur la course. Le cas où elle échoue a ses propres tests (ConcurrencyTests), et le
+        // laisser à la valeur par défaut de Moq — faux — ferait échouer toute transition ici.
+        runRepo.Setup(r => r.TryUpdateWithExpectedStatusAsync(
+                It.IsAny<Run>(), It.IsAny<RunStatus>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
         eventBus = new Mock<IEventBus>();
         eventBus.Setup(e => e.PublishAsync(It.IsAny<RunEvent>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
@@ -48,7 +55,15 @@ public class RunStateMachineTests
         await sut.TransitionAsync(run, RunStatus.Queued);
 
         Assert.Equal(RunStatus.Queued, run.Status);
-        runRepo.Verify(r => r.UpdateAsync(run, It.IsAny<CancellationToken>()), Times.Once);
+
+        // L'écriture porte l'état ATTENDU en condition : c'est ce qui distingue une transition
+        // d'une écriture. Vérifier un `UpdateAsync` inconditionnel laisserait passer un retour en
+        // arrière vers l'écriture non gardée, qui permettait à quatre approbations simultanées de
+        // reprendre quatre fois le même run.
+        runRepo.Verify(
+            r => r.TryUpdateWithExpectedStatusAsync(run, RunStatus.Pending, It.IsAny<CancellationToken>()),
+            Times.Once);
+        runRepo.Verify(r => r.UpdateAsync(It.IsAny<Run>(), It.IsAny<CancellationToken>()), Times.Never);
         eventBus.Verify(e => e.PublishAsync(It.Is<RunEvent>(ev => ev.EventType == "run.status_changed"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
