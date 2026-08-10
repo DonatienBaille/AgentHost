@@ -46,10 +46,25 @@ public sealed class FakeSmtpServer : IAsyncDisposable
     /// <summary>Identifiants présentés par le client, ou null s'il n'en a pas envoyé.</summary>
     public (string User, string Password)? Credentials { get; private set; }
 
-    public FakeSmtpServer(bool offerStartTls = true, bool requireAuth = true)
+    /// <summary>
+    /// La session a-t-elle été chiffrée dès l'ouverture de la socket, sans <c>STARTTLS</c> ?
+    ///
+    /// Distinct de <see cref="StartTlsNegotiated"/>, et pas par coquetterie : les deux modes
+    /// aboutissent à une session chiffrée, mais un client qui ferait du STARTTLS là où l'on attend
+    /// du TLS implicite ne pourrait tout simplement pas parler à un relais qui n'écoute qu'en 465.
+    /// C'est précisément la différence que le port 465 rendait inaccessible.
+    /// </summary>
+    public bool ImplicitTlsNegotiated { get; private set; }
+
+    /// <param name="implicitTls">
+    /// Chiffre dès l'acceptation de la connexion (port 465, SMTPS). Le serveur n'annonce alors pas
+    /// <c>STARTTLS</c> : un relais en TLS implicite n'a rien à monter, la session l'est déjà.
+    /// </param>
+    public FakeSmtpServer(bool offerStartTls = true, bool requireAuth = true, bool implicitTls = false)
     {
-        OffersStartTls = offerStartTls;
+        OffersStartTls = offerStartTls && !implicitTls;
         RequiresAuth = requireAuth;
+        ImplicitTls = implicitTls;
 
         _certificate = CreateSelfSignedCertificate();
 
@@ -62,6 +77,7 @@ public sealed class FakeSmtpServer : IAsyncDisposable
 
     private bool OffersStartTls { get; }
     private bool RequiresAuth { get; }
+    private bool ImplicitTls { get; }
 
     /// <summary>Attend le message, ou échoue au bout du délai plutôt que de bloquer la suite.</summary>
     public async Task<ReceivedMessage> WaitForMessageAsync(TimeSpan timeout)
@@ -95,6 +111,17 @@ public sealed class FakeSmtpServer : IAsyncDisposable
 
         try
         {
+            // TLS implicite : on négocie AVANT d'écrire la bannière 220. C'est toute la différence
+            // avec STARTTLS — il n'y a aucun échange en clair, pas même la salutation, donc rien à
+            // observer ni à supprimer sur le fil pour faire retomber la session en clair.
+            if (ImplicitTls)
+            {
+                var tunnel = new SslStream(stream, leaveInnerStreamOpen: false);
+                await tunnel.AuthenticateAsServerAsync(_certificate, false, checkCertificateRevocation: false);
+                stream = tunnel;
+                ImplicitTlsNegotiated = true;
+            }
+
             var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
             var writer = new StreamWriter(stream, Encoding.ASCII, leaveOpen: true) { AutoFlush = true, NewLine = "\r\n" };
 

@@ -229,7 +229,7 @@ nôtre. Sont couverts par des tests : l'implémentation locale de bout en bout, 
   "Smtp": {
     "Host": "smtp.exemple.org",
     "Port": "587",
-    "Security": "starttls",                        // ou "none" ; tout le reste vaut starttls
+    "Security": "starttls",                        // "starttls" (587), "ssl" (465, TLS implicite), "none"
     "UserName": "", "Password": "",                // vides = pas d'authentification
     "TimeoutSeconds": "15"
   }

@@ -197,7 +197,12 @@ public class EmailSenderTests
     [InlineData("starttls", SmtpSecurity.StartTls)]
     // Une faute de frappe doit chiffrer, jamais dégrader le transport en clair.
     [InlineData("startls", SmtpSecurity.StartTls)]
-    [InlineData("ssl", SmtpSecurity.StartTls)]
+    // « ssl » et « smtps » demandent le TLS implicite, ce qu'ils ont toujours voulu dire dans les
+    // interfaces d'hébergeurs. Ils étaient auparavant ramenés à STARTTLS faute de savoir faire
+    // autrement : le transport restait chiffré, mais un relais qui n'écoute qu'en 465 refusait la
+    // connexion sans que le message d'erreur en dise la raison.
+    [InlineData("ssl", SmtpSecurity.Ssl)]
+    [InlineData("SMTPS", SmtpSecurity.Ssl)]
     [InlineData("none", SmtpSecurity.None)]
     public void SmtpSecurity_OnlyFallsBackToPlaintextWhenAskedExplicitly(string? configured, SmtpSecurity expected)
     {

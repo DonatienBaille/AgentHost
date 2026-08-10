@@ -13,6 +13,16 @@ public enum SmtpSecurity
 
     /// <summary>TLS explicite : connexion en clair puis commande STARTTLS. Le cas normal (port 587).</summary>
     StartTls,
+
+    /// <summary>
+    /// TLS implicite : la session est chiffrée dès l'ouverture de la socket, sans échange en clair
+    /// préalable (port 465, appelé SMTPS ou simplement « SSL » dans les interfaces d'hébergeurs).
+    ///
+    /// Cette valeur a longtemps été absente parce que <c>System.Net.Mail.SmtpClient</c> ne sait pas
+    /// la faire, et qu'offrir un mode « ssl » qui ne chiffrerait pas comme annoncé aurait été pire
+    /// que de ne rien offrir. Elle existe depuis le passage à MailKit.
+    /// </summary>
+    Ssl,
 }
 
 /// <summary>
@@ -181,15 +191,20 @@ public sealed class SmtpOptions
     }
 
     /// <summary>
-    /// Analyse le mode de chiffrement. Tout ce qui n'est pas explicitement « none » active
-    /// STARTTLS : le défaut sûr est de chiffrer, et une faute de frappe ne doit pas dégrader le
-    /// transport en clair. « ssl » est accepté et traité comme STARTTLS — voir la note sur le TLS
-    /// implicite dans <see cref="SmtpEmailSender"/>.
+    /// Analyse le mode de chiffrement. Tout ce qui n'est pas explicitement « none » chiffre : le
+    /// défaut sûr est de chiffrer, et une faute de frappe ne doit jamais dégrader le transport en
+    /// clair.
+    ///
+    /// <c>« ssl »</c> et <c>« smtps »</c> demandent désormais le TLS implicite, ce qu'ils ont
+    /// toujours voulu dire dans les interfaces d'hébergeurs. Ils étaient auparavant ramenés à
+    /// STARTTLS faute de savoir faire autrement — le transport restait chiffré, mais un relais qui
+    /// n'écoute qu'en 465 refusait la connexion, et le message d'erreur ne disait pas pourquoi.
     /// </summary>
     public static SmtpSecurity ParseSecurity(string? value) =>
         (value ?? string.Empty).Trim().ToLowerInvariant() switch
         {
             "none" or "false" or "plain" or "aucun" => SmtpSecurity.None,
+            "ssl" or "smtps" or "tls-implicite" or "implicit" => SmtpSecurity.Ssl,
             _ => SmtpSecurity.StartTls,
         };
 }

@@ -538,9 +538,30 @@ Reste à traiter :
 
   9 tests de comportement + 8 d'intégration SQL (dont la course entre deux répartiteurs, que seul
   `FOR UPDATE SKIP LOCKED` tranche).
-- Le TLS implicite du port 465 n'est pas géré par `SmtpEmailSender` (limite de
-  `System.Net.Mail.SmtpClient`) ; un déploiement qui n'a que du 465 doit passer par un relais local
-  ou justifier l'ajout de MailKit.
+- ✅ **Le TLS implicite du port 465 est géré** (`Email:Smtp:Security = "ssl"`). Le raisonnement qui
+  écartait MailKit énonçait sa propre condition de révision — *« un déploiement qui n'a que du 465
+  doit passer par un relais local, ou justifier à ce moment-là l'ajout de MailKit »*. C'était ce
+  moment : `System.Net.Mail.SmtpClient` ne sait faire que du TLS **explicite** (STARTTLS), et le TLS
+  implicite lui est structurellement hors de portée. Ce n'était donc pas une lacune à combler par du
+  code applicatif, et le contournement documenté revenait à demander à chaque exploitant
+  d'administrer un serveur de messagerie pour compenser un choix de dépendance.
+
+  `IEmailSender` avait été conçue pour absorber exactement ce changement : aucun appelant n'a bougé,
+  aucune option n'a changé de nom, `SmtpSecurity` gagne la valeur qui lui manquait.
+
+  Deux choix méritent d'être connus. **Les modes chiffrants sont les variantes exigeantes**
+  (`SslOnConnect`, `StartTls`) et non leurs équivalents tolérants : ceux-ci retombent en clair quand
+  le serveur n'annonce pas TLS, ce qui ferait partir les identifiants et le jeton de
+  réinitialisation en clair, sans erreur et sans trace. Un test le vérifie en demandant du TLS
+  implicite à un serveur qui n'en fait pas — il doit échouer, pas se dégrader. Et **le crochet de
+  validation du certificat est passé de global au processus à porté par instance** : la version
+  précédente devait poser `ServicePointManager.ServerCertificateValidationCallback`, ce qui
+  obligeait à désactiver le parallélisme de toute une collection de tests. Le crochet reste interne,
+  sans réglage exposé — un interrupteur « accepter n'importe quel certificat » finit toujours par se
+  retrouver activé en production « le temps de déboguer ».
+
+  8 tests contre un vrai serveur SMTP, dont deux nouveaux pour le port 465. Vérifié par sabotage :
+  ramener `ssl` à STARTTLS, puis passer aux variantes tolérantes, fait tomber les tests attendus.
 - ✅ **`SmtpEmailSender` parle enfin un vrai SMTP.** Aucun relais n'étant joignable ici, le serveur
   a été amené à soi : `FakeSmtpServer` (≈ 200 lignes) parle EHLO, STARTTLS avec un certificat
   généré en mémoire, AUTH PLAIN et LOGIN, MAIL/RCPT/DATA. Six tests exercent le chemin complet du

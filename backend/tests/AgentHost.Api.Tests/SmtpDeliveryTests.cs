@@ -23,25 +23,9 @@ namespace AgentHost.Api.Tests;
 /// pour la durée du test. La négociation est donc réellement exercée, la vérification de chaîne ne
 /// l'est pas. Un relais public reste à confronter une fois — même statut que Podman, S3 et HIBP.
 /// </summary>
-[Collection(nameof(SmtpDeliveryTests))]
-[CollectionDefinition(nameof(SmtpDeliveryTests), DisableParallelization = true)]
-public class SmtpDeliveryTests : IDisposable
+public class SmtpDeliveryTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
-
-    private readonly RemoteCertificateValidationCallback? _previousCallback;
-
-    public SmtpDeliveryTests()
-    {
-        // Hook global, d'où la désactivation du parallélisme sur cette collection : deux tests qui
-        // le poseraient et le retireraient en même temps se marcheraient dessus. Il n'existe pas de
-        // moyen de le porter par instance de SmtpClient — c'est une limite du BCL, et la raison
-        // pour laquelle ce test dit ce qu'il ne prouve pas.
-        _previousCallback = ServicePointManager.ServerCertificateValidationCallback;
-        ServicePointManager.ServerCertificateValidationCallback = (_, _, _, _) => true;
-    }
-
-    public void Dispose() => ServicePointManager.ServerCertificateValidationCallback = _previousCallback;
 
     [Fact]
     public async Task A_message_reaches_the_relay_with_its_envelope_and_body_intact()
@@ -81,10 +65,59 @@ public class SmtpDeliveryTests : IDisposable
         await sender.SendAsync(Message());
         await server.WaitForMessageAsync(Timeout);
 
-        // Le point qui justifie tout ce dispositif : `EnableSsl` doit produire un vrai STARTTLS.
-        // Un client qui l'ignorerait enverrait le jeton de réinitialisation en clair sur le
-        // réseau, et rien dans les journaux ne le dirait.
+        // Le point qui justifie tout ce dispositif : le mode STARTTLS doit produire un vrai
+        // STARTTLS. Un client qui l'ignorerait enverrait le jeton de réinitialisation en clair sur
+        // le réseau, et rien dans les journaux ne le dirait.
         Assert.True(server.StartTlsNegotiated);
+    }
+
+    /// <summary>
+    /// Le port 465, c'est-à-dire la dette que ce mode vient solder.
+    ///
+    /// Le TLS implicite chiffre dès l'ouverture de la socket : il n'y a aucun échange en clair, pas
+    /// même la bannière. <c>System.Net.Mail.SmtpClient</c> en était structurellement incapable — il
+    /// ne savait faire que du STARTTLS — et un relais qui n'écoute qu'en 465 refusait donc la
+    /// connexion. Le contournement documenté était d'installer un relais local, c'est-à-dire de
+    /// demander à chaque exploitant d'administrer un serveur de messagerie pour compenser un choix
+    /// de dépendance.
+    /// </summary>
+    [Fact]
+    public async Task A_relay_that_only_speaks_implicit_tls_is_reachable()
+    {
+        await using var server = new FakeSmtpServer(implicitTls: true);
+        var sender = CreateSender(server.Port, security: SmtpSecurity.Ssl);
+
+        await sender.SendAsync(Message());
+        var received = await server.WaitForMessageAsync(Timeout);
+
+        Assert.True(server.ImplicitTlsNegotiated);
+
+        // Et pas seulement connecté : le message doit être arrivé entier. Une connexion qui aboutit
+        // sans que rien ne soit remis serait une régression plus discrète qu'un refus.
+        Assert.True(received.HasHeader("To", "destinataire@example.com"));
+
+        // Le serveur n'a rien annoncé de tel, et le client n'avait rien à monter.
+        Assert.False(server.StartTlsNegotiated);
+    }
+
+    /// <summary>
+    /// Le pendant du test précédent : demander du TLS implicite à un relais qui n'en fait pas doit
+    /// <b>échouer</b>, jamais retomber en clair.
+    ///
+    /// C'est ce qui distingue <c>SslOnConnect</c> des variantes « Auto » de MailKit, et le choix
+    /// est délibéré : une négociation qui se dégrade silencieusement ferait partir les identifiants
+    /// et le jeton de réinitialisation en clair, sans erreur et sans trace.
+    /// </summary>
+    [Fact]
+    public async Task Implicit_tls_never_falls_back_to_a_cleartext_session()
+    {
+        // Un serveur qui parle en clair, alors que la configuration exige du TLS dès la connexion.
+        await using var server = new FakeSmtpServer(offerStartTls: false, requireAuth: false);
+        var sender = CreateSender(server.Port, security: SmtpSecurity.Ssl, timeoutSeconds: 5);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => sender.SendAsync(Message()));
+
+        Assert.False(server.ImplicitTlsNegotiated);
     }
 
     [Fact]
@@ -165,7 +198,8 @@ public class SmtpDeliveryTests : IDisposable
     };
 
     private static SmtpEmailSender CreateSender(
-        int port, string? user = null, string? password = null, int timeoutSeconds = 15)
+        int port, string? user = null, string? password = null, int timeoutSeconds = 15,
+        SmtpSecurity security = SmtpSecurity.StartTls)
     {
         var options = new EmailOptions
         {
@@ -176,14 +210,21 @@ public class SmtpDeliveryTests : IDisposable
             {
                 Host = "127.0.0.1",
                 Port = port,
-                Security = SmtpSecurity.StartTls,
+                Security = security,
                 UserName = user ?? string.Empty,
                 Password = password ?? string.Empty,
                 TimeoutSeconds = timeoutSeconds,
             },
         };
 
-        return new SmtpEmailSender(options, new Serilog.LoggerConfiguration().CreateLogger());
+        return new SmtpEmailSender(options, new Serilog.LoggerConfiguration().CreateLogger())
+        {
+            // Le certificat du serveur de test est auto-signé. Le crochet est porté par CETTE
+            // instance : il ne déborde pas sur les autres tests, contrairement au crochet global du
+            // BCL qu'il remplace — c'est ce qui permet de laisser cette collection s'exécuter en
+            // parallèle des autres.
+            CertificateValidationOverride = (_, _, _, _) => true,
+        };
     }
 
     private static int FreePort()
