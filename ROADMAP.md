@@ -1,7 +1,7 @@
 # Feuille de route — Agent Host
 
 État de référence : branche `claude/specification-implementation-ppg4nn`.
-531 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
+537 tests backend, 778 tests frontend, 22 tests end-to-end Playwright, build sans warning.
 (Chiffres mesurés en exécutant les trois suites après fusion, pas déduits.)
 
 Ce document est la todolist du projet. Chaque lot indique **pourquoi** il existe, **ce qu'il
@@ -525,10 +525,23 @@ Reste à traiter :
 - Le TLS implicite du port 465 n'est pas géré par `SmtpEmailSender` (limite de
   `System.Net.Mail.SmtpClient`) ; un déploiement qui n'a que du 465 doit passer par un relais local
   ou justifier l'ajout de MailKit.
-- **`SmtpEmailSender` n'a jamais parlé à un vrai serveur SMTP** : aucun relais n'est joignable dans
-  l'environnement de développement. Sa sélection par configuration et sa construction sont testées ;
-  la poignée de main STARTTLS, l'authentification et le délai d'expiration reposent sur le contrat
-  documenté du BCL, pas sur une observation. À confronter au réel une fois, comme Podman, S3 et HIBP
+- ✅ **`SmtpEmailSender` parle enfin un vrai SMTP.** Aucun relais n'étant joignable ici, le serveur
+  a été amené à soi : `FakeSmtpServer` (≈ 200 lignes) parle EHLO, STARTTLS avec un certificat
+  généré en mémoire, AUTH PLAIN et LOGIN, MAIL/RCPT/DATA. Six tests exercent le chemin complet du
+  vrai `SmtpClient`.
+
+  **Un défaut est tombé aussitôt** : `SmtpClient.Timeout` est **ignoré par `SendMailAsync`** — il ne
+  gouverne que les surcharges synchrones. Un relais qui accepte la connexion puis se tait faisait
+  donc pendre l'envoi indéfiniment. Or `EmailDispatcher` est un consommateur unique : **un seul
+  envoi bloqué arrêtait toute la remise de courriels de l'installation**, sans erreur et sans trace.
+  Mesuré (20 s sans abandon pour un délai configuré à 2 s), pas déduit. Le délai est désormais porté
+  par un jeton d'annulation, que `SendMailAsync` respecte, et un dépassement lève une
+  `TimeoutException` distincte d'une annulation par l'appelant — confondre les deux rendrait
+  l'extinction du processus indiscernable d'un incident.
+
+  Ce que ces tests **ne** prouvent pas : le certificat est auto-signé et sa validation est
+  désactivée pendant le test. La négociation TLS est réellement exercée, la vérification de chaîne
+  ne l'est pas. Un relais public reste à confronter une fois, au même titre que Podman, S3 et HIBP
   (lot 1.3).
 - ✅ Les écrans `/reset-password` et `/accept-invitation` existent : les liens des courriels mènent
   désormais quelque part. La réinitialisation affiche **le même message que l'adresse existe ou

@@ -35,6 +35,14 @@ namespace AgentHost.Api.Services.Email;
 /// <b>Le chiffrement n'est jamais dégradé silencieusement.</b> <c>Email:Smtp:Security</c> vaut
 /// STARTTLS pour toute valeur qui n'est pas explicitement « none », et une configuration qui
 /// envoie des identifiants sur un transport en clair est signalée au démarrage.
+///
+/// <b>Le délai d'expiration est appliqué ici, et non par <c>SmtpClient.Timeout</c>.</b> Cette
+/// propriété est <i>ignorée</i> par <c>SendMailAsync</c> : elle ne gouverne que les surcharges
+/// synchrones. Mesuré, pas déduit — un relais qui accepte la connexion puis se tait laissait
+/// l'envoi pendre indéfiniment (voir <c>SmtpDeliveryTests</c>). Or le répartiteur de courriels est
+/// un consommateur unique : un seul envoi bloqué arrêtait toute la remise de l'installation, sans
+/// erreur et sans trace. Le délai est donc porté par un jeton d'annulation, que
+/// <c>SendMailAsync</c>, lui, respecte.
 /// </summary>
 public sealed class SmtpEmailSender : IEmailSender
 {
@@ -91,7 +99,23 @@ public sealed class SmtpEmailSender : IEmailSender
         };
         mail.To.Add(new MailAddress(message.To));
 
-        await client.SendMailAsync(mail, ct);
+        // Le jeton de l'appelant ET le délai, liés : le premier qui parle gagne.
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
+
+        try
+        {
+            await client.SendMailAsync(mail, deadline.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Distinguer les deux causes : une annulation par l'appelant est un arrêt normal du
+            // service, un dépassement de délai est une panne du relais. Les confondre rendrait
+            // l'extinction du processus indiscernable d'un incident.
+            throw new TimeoutException(
+                $"Le relais SMTP {_options.Host}:{_options.Port} n'a pas répondu en " +
+                $"{_options.TimeoutSeconds} s.");
+        }
 
         // Ni le sujet ni le corps : le corps contient le jeton brut.
         _logger.Information("Courriel « {Kind} » remis au relais SMTP pour {Recipient}",
