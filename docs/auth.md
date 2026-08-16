@@ -136,7 +136,7 @@ dependency of it.
 
 ---
 
-## 4. Email delivery, and what is still not production-ready
+## 4. Email delivery
 
 Both token-based flows deliver their link by email, through `IEmailSender` (`Services/Email/`).
 Two implementations, chosen by `Email:Provider`:
@@ -144,16 +144,20 @@ Two implementations, chosen by `Email:Provider`:
 | `Email:Provider` | Implementation | Behaviour |
 |---|---|---|
 | `none` *(default)* | `NoOpEmailSender` | Delivers nothing. Logs a **Warning** naming the message that did *not* go out and why. This is the repository's historical behaviour, made explicit. |
-| `smtp` | `SmtpEmailSender` | Real SMTP over `System.Net.Mail.SmtpClient`: host, port, STARTTLS, optional authentication, sender address, timeout. Implicit TLS (port 465) is **not** supported — see the class comment. |
+| `smtp` | `SmtpEmailSender` | Real SMTP over MailKit: host, port, STARTTLS **or implicit TLS (port 465)**, optional authentication, sender address, timeout. Both encrypted modes are strict — they fail rather than falling back to cleartext. |
 
 An incomplete SMTP configuration (no host, missing or malformed `Email:FromAddress`, unknown
 provider) falls back to the no-op sender with a stated reason rather than refusing to start.
 
-**Sending is never on the response path.** Callers hand messages to `IEmailDispatcher`, which writes
-to an in-memory queue and returns immediately; a background service drains it. That is a security
-property, not an optimisation — see §4.2. The queue is not persistent: an abrupt shutdown loses
-messages that have not gone out yet, which is acceptable for mail a user can simply request again,
-and is the extension point where a database-backed outbox would go.
+**Sending is never on the response path.** Callers hand messages to `IEmailDispatcher`, which
+returns immediately; a background service delivers them. That is a security property, not an
+optimisation — see §4.2. Delivery is backed by a **durable outbox** (`email_outbox`, migration
+`0013`): a failed send is retried with an exponential backoff that survives a restart, and a message
+finally given up on stays visible in the database with its last error. The body is **encrypted at
+rest** — it carries a raw token, and storing it in the clear would have undone the hash-only token
+rule through the back door. The residual window is the few milliseconds between enqueueing and the
+consumer's write: persisting inside the request would reopen the very enumeration oracle
+the flat 202 closes (see §4.2), so that window is deliberate and stated rather than papered over.
 
 Relevant keys, all documented inline in `appsettings.json`: `Email:Provider`, `Email:FromAddress`,
 `Email:FromName`, `Email:AppBaseUrl` (the public front-end root the links point at),

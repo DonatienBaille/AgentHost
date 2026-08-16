@@ -75,12 +75,20 @@ doit être refusée.
 
 ## 4. Envoi SMTP
 
-`SmtpEmailSender.SendAsync` n'a jamais été exécuté contre un socket. Ce qui est testé, c'est sa
-sélection par configuration et sa construction ; la poignée de main STARTTLS, le mappage de
-`EnableSsl`, l'authentification et le délai d'expiration reposent sur le contrat documenté du BCL.
+**Ce point est désormais couvert par des tests**, et il n'a pas fallu attendre un relais réel :
+aucun n'étant joignable ici, le serveur a été amené à soi. `FakeSmtpServer` parle EHLO, STARTTLS,
+TLS implicite, AUTH PLAIN et LOGIN, MAIL/RCPT/DATA, avec un certificat généré en mémoire — le vrai
+client MailKit fait le trajet complet, dans les trois modes de chiffrement.
 
-Rappel : le TLS implicite du port 465 n'est **pas** géré, limite assumée de
-`System.Net.Mail.SmtpClient`.
+Un défaut est tombé aussitôt : `SmtpClient.Timeout` (BCL, implémentation précédente) est **ignoré**
+par `SendMailAsync`. Un relais qui accepte la connexion puis se tait faisait pendre l'envoi
+indéfiniment — et le répartiteur étant un consommateur unique, **un seul envoi bloqué arrêtait toute
+la remise de l'installation**, sans erreur et sans trace. Mesuré (20 s sans abandon pour un délai
+configuré à 2 s), pas déduit.
+
+**Ce qui reste non prouvé** : le certificat de test est auto-signé et sa validation est neutralisée.
+La négociation TLS est réellement exercée, la **vérification de chaîne** ne l'est pas. Un relais
+public reste à confronter une fois.
 
 **Comment valider** : un MailHog ou un Mailpit local (`Email__Provider=smtp`,
 `Email__Smtp__Host` vers lui, `Security=none`), puis une demande de réinitialisation de mot de
